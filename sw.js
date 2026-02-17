@@ -12,8 +12,7 @@ const STATIC_ASSETS  = [
   '/icons/icon-192.png',
   '/icons/icon-512.png',
   'https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&family=Sora:wght@300;400;500;600;700&display=swap',
-  'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js',
-  'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js',
+  'https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js',
 ];
 
 // ─── Push notification message bank ──────────────────────────────────────────

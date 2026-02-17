@@ -737,12 +737,28 @@
       font-size: 14px;
       font-weight: 600;
       color: var(--text-1);
+      padding: 4px 8px;
+      margin: -4px -8px;
+      border-radius: 6px;
+      transition: background var(--transition);
+    }
+
+    .day-label[contenteditable="true"] {
+      background: var(--surface);
+      outline: 1px solid var(--indigo);
+      cursor: text;
     }
 
     .day-meta {
       font-size: 12px;
       color: var(--text-3);
       margin-top: 2px;
+    }
+
+    .day-actions {
+      display: flex;
+      gap: 6px;
+      margin-right: 8px;
     }
 
     .day-chevron {
@@ -805,13 +821,52 @@
     .task-topic {
       font-size: 13px;
       color: var(--text-2);
+      padding: 2px 6px;
+      margin: -2px -6px;
+      border-radius: 6px;
+      transition: background var(--transition);
+    }
+
+    .task-topic[contenteditable="true"] {
+      background: var(--surface);
+      outline: 1px solid var(--indigo);
+      cursor: text;
     }
 
     .task-time {
       font-family: var(--font-mono);
       font-size: 12px;
       color: var(--text-3);
+      padding: 4px 8px;
+      border-radius: 6px;
+      transition: background var(--transition);
     }
+
+    .task-time[contenteditable="true"] {
+      background: var(--surface);
+      outline: 1px solid var(--indigo);
+      cursor: text;
+    }
+
+    .task-actions {
+      display: flex;
+      gap: 4px;
+      align-items: center;
+    }
+
+    .task-edit-btn {
+      width: 28px;
+      height: 28px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--text-3);
+      border-radius: 6px;
+      -webkit-tap-highlight-color: transparent;
+      transition: background var(--transition), color var(--transition);
+    }
+    .task-edit-btn:active { background: var(--indigo-dim); color: var(--indigo); }
+    .task-edit-btn.editing { background: var(--indigo-dim); color: var(--indigo); }
 
     .task-delete {
       width: 28px;
@@ -1633,14 +1688,14 @@
         </button>
       </div>
 
-      <!-- PDF Import strip -->
+      <!-- CSV Import strip -->
       <div class="import-strip">
         <div class="import-text">
           <div class="import-title">Import Study Plan</div>
-          <div class="import-sub">Parse a structured PDF automatically</div>
+          <div class="import-sub">Upload a CSV file with your schedule</div>
         </div>
-        <button class="btn-import" id="btnImportPDF">Import PDF</button>
-        <input type="file" id="pdfFileInput" accept=".pdf,application/pdf" style="display:none">
+        <button class="btn-import" id="btnImportCSV">Import CSV</button>
+        <input type="file" id="csvFileInput" accept=".csv,text/csv" style="display:none">
       </div>
 
       <div class="days-list" id="daysList">
@@ -1975,27 +2030,22 @@
   </div>
 </div>
 
-<!-- ═══ PDF PROCESSING INDICATOR ═══ -->
-<div id="pdfProcessing" style="display:none;position:fixed;inset:0;z-index:250;background:rgba(9,9,16,0.92);display:none;flex-direction:column;align-items:center;justify-content:center;gap:16px;">
+<!-- ═══ CSV PROCESSING INDICATOR ═══ -->
+<div id="csvProcessing" style="display:none;position:fixed;inset:0;z-index:250;background:rgba(9,9,16,0.92);display:none;flex-direction:column;align-items:center;justify-content:center;gap:16px;">
   <div style="width:48px;height:48px;border:3px solid var(--border-mid);border-top-color:var(--indigo);border-radius:50%;animation:spin 0.8s linear infinite;"></div>
-  <div style="font-size:14px;color:var(--text-2);" id="pdfStatus">Parsing PDF…</div>
+  <div style="font-size:14px;color:var(--text-2);" id="csvStatus">Parsing CSV…</div>
 </div>
 
 <style>
   @keyframes spin { to { transform: rotate(360deg); } }
-  #pdfProcessing { display: none; }
-  #pdfProcessing.active { display: flex; }
+  #csvProcessing { display: none; }
+  #csvProcessing.active { display: flex; }
 </style>
 
 <!-- ═══════════════════════════════════════════════
-     PDF.JS
+     PAPAPARSE — CSV Parsing
 ═══════════════════════════════════════════════ -->
-<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-<script>
-if (window.pdfjsLib) {
-  pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
-}
-</script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
 
 <!-- ═══════════════════════════════════════════════
      SUPABASE CLIENT (optional — loaded if configured)
@@ -2118,6 +2168,14 @@ const App = (() => {
       if (!Supa.client) return;
       await Supa.client.from('study_tasks').update({ status }).eq('id', id);
     },
+    async updateTask(id, updates) {
+      if (!Supa.client) return;
+      await Supa.client.from('study_tasks').update(updates).eq('id', id);
+    },
+    async updateDay(id, updates) {
+      if (!Supa.client) return;
+      await Supa.client.from('study_days').update(updates).eq('id', id);
+    },
     async insertSession(s) {
       if (!Supa.client) return;
       await Supa.client.from('focus_sessions').insert(s);
@@ -2125,6 +2183,11 @@ const App = (() => {
     async deleteTask(id) {
       if (!Supa.client) return;
       await Supa.client.from('study_tasks').delete().eq('id', id);
+    },
+    async deleteDay(id) {
+      if (!Supa.client) return;
+      // Cascade delete happens automatically via FK constraint
+      await Supa.client.from('study_days').delete().eq('id', id);
     },
   };
 
@@ -2335,8 +2398,16 @@ const App = (() => {
         <div class="day-card-header" onclick="App.toggleDayCard('${day.id}')">
           <div class="day-number-badge">${day.label || `Day ${idx+1}`}</div>
           <div class="day-info">
-            <div class="day-label">${day.label}${today ? ' <span class="badge badge-indigo">Today</span>' : ''}</div>
+            <div class="day-label" contenteditable="false" data-day-id="${day.id}" data-field="label">${day.label}${today ? ' <span class="badge badge-indigo">Today</span>' : ''}</div>
             <div class="day-meta">${day.date || 'No date'} · ${tasks.length} tasks · ${done}/${tasks.length} done</div>
+          </div>
+          <div class="day-actions" onclick="event.stopPropagation()">
+            <button class="btn-icon-sm" onclick="App.toggleEditDay('${day.id}')" title="Edit day label">
+              <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+            </button>
+            <button class="btn-icon-sm" onclick="App.deleteDay('${day.id}')" title="Delete day" style="color:var(--rose)">
+              <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="3,6 5,6 21,6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6m3 0V4a1 1 0 011-1h4a1 1 0 011 1v2"/></svg>
+            </button>
           </div>
           <svg class="day-chevron" viewBox="0 0 24 24"><polyline points="9,18 15,12 9,6"/></svg>
         </div>
@@ -2354,17 +2425,22 @@ const App = (() => {
   function renderTaskRow(task) {
     const color = SUBJECT_COLORS[task.subject] || SUBJECT_COLORS.Other;
     const done  = task.status === 'completed';
-    return `<div class="task-item">
+    return `<div class="task-item" data-task-id="${task.id}">
       <div class="task-check ${done ? 'done' : ''}" onclick="App.toggleTask('${task.id}')">
         ${done ? '<svg width="12" height="12" fill="none" stroke="white" stroke-width="3" viewBox="0 0 24 24"><polyline points="20,6 9,17 4,12"/></svg>' : ''}
       </div>
       <div class="task-info">
         <div class="task-subject" style="color:${color}">${task.subject}</div>
-        <div class="task-topic">${task.topic}</div>
+        <div class="task-topic" contenteditable="false" data-field="topic">${task.topic}</div>
       </div>
-      <div class="task-time">${fmtMins(task.estimated_minutes || 0)}</div>
-      <div class="task-delete" onclick="App.deleteTask('${task.id}')">
-        <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="3,6 5,6 21,6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6m3 0V4a1 1 0 011-1h4a1 1 0 011 1v2"/></svg>
+      <div class="task-time" contenteditable="false" data-field="minutes">${fmtMins(task.estimated_minutes || 0)}</div>
+      <div class="task-actions">
+        <button class="task-edit-btn" onclick="App.toggleEditTask('${task.id}')" title="Edit">
+          <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+        </button>
+        <button class="task-delete" onclick="App.deleteTask('${task.id}')" title="Delete">
+          <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="3,6 5,6 21,6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6m3 0V4a1 1 0 011-1h4a1 1 0 011 1v2"/></svg>
+        </button>
       </div>
     </div>`;
   }
@@ -2627,12 +2703,145 @@ const App = (() => {
     renderHome();
   }
 
+  // ─── Task editing ─────────────────────────────────────────────────────
+  function toggleEditTask(taskId) {
+    const taskItem = document.querySelector(`[data-task-id="${taskId}"]`);
+    if (!taskItem) return;
+
+    const topicEl = taskItem.querySelector('[data-field="topic"]');
+    const minsEl  = taskItem.querySelector('[data-field="minutes"]');
+    const editBtn = taskItem.querySelector('.task-edit-btn');
+
+    const isEditing = topicEl.getAttribute('contenteditable') === 'true';
+
+    if (isEditing) {
+      // Save changes
+      const newTopic = topicEl.textContent.trim();
+      const minsText = minsEl.textContent.trim();
+      
+      // Parse minutes from formatted string (e.g., "45m" or "1h 30m")
+      let newMins = 0;
+      const hMatch = minsText.match(/(\d+)h/);
+      const mMatch = minsText.match(/(\d+)m/);
+      if (hMatch) newMins += parseInt(hMatch[1]) * 60;
+      if (mMatch) newMins += parseInt(mMatch[1]);
+      
+      if (!newTopic || newMins <= 0) {
+        toast('Invalid task data', 'error');
+        return;
+      }
+
+      const task = state.tasks.find(t => t.id === taskId);
+      if (task) {
+        task.topic = newTopic;
+        task.estimated_minutes = newMins;
+        DB.save();
+        Supa.updateTask(taskId, { topic: newTopic, estimated_minutes: newMins });
+        toast('Task updated', 'success');
+      }
+
+      topicEl.setAttribute('contenteditable', 'false');
+      minsEl.setAttribute('contenteditable', 'false');
+      editBtn.classList.remove('editing');
+      
+      // Re-render to update display
+      renderPlan();
+      renderHome();
+      renderBacklog();
+    } else {
+      // Enable editing
+      topicEl.setAttribute('contenteditable', 'true');
+      minsEl.setAttribute('contenteditable', 'true');
+      editBtn.classList.add('editing');
+      topicEl.focus();
+      
+      // Select minutes text for easier editing
+      minsEl.addEventListener('focus', () => {
+        const range = document.createRange();
+        range.selectNodeContents(minsEl);
+        const sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+      }, { once: true });
+    }
+  }
+
+  // ─── Day editing ──────────────────────────────────────────────────────
+  function toggleEditDay(dayId) {
+    const labelEl = document.querySelector(`[data-day-id="${dayId}"][data-field="label"]`);
+    if (!labelEl) return;
+
+    const isEditing = labelEl.getAttribute('contenteditable') === 'true';
+
+    if (isEditing) {
+      // Save changes
+      const newLabel = labelEl.textContent.trim();
+      if (!newLabel) {
+        toast('Day label cannot be empty', 'error');
+        return;
+      }
+
+      const day = state.days.find(d => d.id === dayId);
+      if (day) {
+        day.label = newLabel;
+        DB.save();
+        Supa.updateDay(dayId, { label: newLabel });
+        toast('Day label updated', 'success');
+      }
+
+      labelEl.setAttribute('contenteditable', 'false');
+      renderPlan();
+      renderHome();
+    } else {
+      // Enable editing
+      // Remove badge before editing
+      const badgeEl = labelEl.querySelector('.badge');
+      if (badgeEl) badgeEl.remove();
+      
+      labelEl.setAttribute('contenteditable', 'true');
+      labelEl.focus();
+      
+      // Select all text
+      const range = document.createRange();
+      range.selectNodeContents(labelEl);
+      const sel = window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(range);
+    }
+  }
+
+  function deleteDay(dayId) {
+    const day = state.days.find(d => d.id === dayId);
+    if (!day) return;
+
+    const tasksCount = state.tasks.filter(t => t.day_id === dayId).length;
+    
+    if (!confirm(`Delete "${day.label}" and ${tasksCount} task(s)?`)) return;
+
+    // Delete all tasks for this day (cascade)
+    state.tasks = state.tasks.filter(t => t.day_id !== dayId);
+    
+    // Delete day
+    state.days = state.days.filter(d => d.id !== dayId);
+    
+    DB.save();
+    Supa.deleteDay(dayId); // This will cascade delete tasks in Supabase
+    
+    renderPlan();
+    renderHome();
+    renderBacklog();
+    toast('Day deleted', 'success');
+  }
+
   function deleteTask(taskId) {
+    if (!confirm('Delete this task?')) return;
+    
     state.tasks = state.tasks.filter(t => t.id !== taskId);
     DB.save();
     Supa.deleteTask(taskId);
     renderPlan();
     renderHome();
+    renderBacklog();
     toast('Task removed');
   }
 
@@ -2828,134 +3037,140 @@ const App = (() => {
     } catch(e) {}
   }
 
-  // ─── PDF Import ───────────────────────────────────────────────────────
-  async function handlePDFImport(file) {
-    if (!file || file.type !== 'application/pdf') {
-      toast('Please select a valid PDF', 'error'); return;
+  // ─── CSV Import ───────────────────────────────────────────────────────
+  async function handleCSVImport(file) {
+    if (!file || !file.name.toLowerCase().endsWith('.csv')) {
+      toast('Please select a valid CSV file', 'error');
+      return;
     }
 
-    const proc = document.getElementById('pdfProcessing');
+    const proc = document.getElementById('csvProcessing');
     proc.classList.add('active');
-    document.getElementById('pdfStatus').textContent = 'Reading PDF…';
+    document.getElementById('csvStatus').textContent = 'Reading CSV…';
 
     try {
-      const arrayBuffer = await file.arrayBuffer();
-      const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+      const text = await file.text();
+      
+      document.getElementById('csvStatus').textContent = 'Parsing data…';
+      
+      // Parse CSV with PapaParse
+      const parsed = Papa.parse(text, {
+        header: true,
+        skipEmptyLines: true,
+        transformHeader: h => h.trim().toLowerCase().replace(/\s+/g, '_')
+      });
 
-      let fullText = '';
-      document.getElementById('pdfStatus').textContent = `Parsing ${pdf.numPages} pages…`;
-
-      for (let p = 1; p <= pdf.numPages; p++) {
-        const page = await pdf.getPage(p);
-        const content = await page.getTextContent();
-        fullText += content.items.map(i => i.str).join(' ') + '\n';
-      }
-
-      document.getElementById('pdfStatus').textContent = 'Extracting plan…';
-      const parsed = parsePDFText(fullText);
-
-      if (parsed.days.length === 0) {
+      if (parsed.errors.length > 0) {
         proc.classList.remove('active');
-        toast('Could not detect study plan structure', 'error');
+        toast('CSV parsing error — check file format', 'error');
+        console.error('CSV errors:', parsed.errors);
         return;
       }
 
-      // Import parsed data
+      const rows = parsed.data;
+      if (rows.length === 0) {
+        proc.classList.remove('active');
+        toast('CSV file is empty', 'error');
+        return;
+      }
+
+      // Validate required columns
+      const requiredCols = ['day', 'subject', 'topic', 'estimated_minutes'];
+      const firstRow = rows[0];
+      const missing = requiredCols.filter(col => !(col in firstRow));
+      
+      if (missing.length > 0) {
+        proc.classList.remove('active');
+        toast(`Missing columns: ${missing.join(', ')}`, 'error');
+        return;
+      }
+
+      document.getElementById('csvStatus').textContent = 'Validating data…';
+
+      // Validate data
+      const errors = [];
+      rows.forEach((row, idx) => {
+        if (!row.day || !row.subject || !row.topic) {
+          errors.push(`Row ${idx + 2}: Missing day, subject, or topic`);
+        }
+        const mins = parseInt(row.estimated_minutes);
+        if (isNaN(mins) || mins <= 0) {
+          errors.push(`Row ${idx + 2}: Invalid estimated_minutes (must be positive number)`);
+        }
+      });
+
+      if (errors.length > 0) {
+        proc.classList.remove('active');
+        toast('Validation failed — see console', 'error');
+        console.error('CSV validation errors:', errors);
+        return;
+      }
+
+      document.getElementById('csvStatus').textContent = 'Importing schedule…';
+
+      // Group by day
+      const dayGroups = {};
+      rows.forEach(row => {
+        const dayKey = row.day.trim();
+        if (!dayGroups[dayKey]) dayGroups[dayKey] = [];
+        dayGroups[dayKey].push(row);
+      });
+
+      // Generate sequential dates starting from today
+      const startDate = new Date();
+      const dayKeys = Object.keys(dayGroups);
+      
       let addedDays = 0, addedTasks = 0;
-      for (const dayData of parsed.days) {
-        const day = { id: uid(), label: dayData.label, date: dayData.date, created_at: new Date().toISOString() };
+
+      // Import each day
+      for (let i = 0; i < dayKeys.length; i++) {
+        const dayKey = dayKeys[i];
+        const dayTasks = dayGroups[dayKey];
+        
+        // Create day with sequential date
+        const dayDate = new Date(startDate);
+        dayDate.setDate(startDate.getDate() + i);
+        const dateStr = dayDate.toISOString().slice(0, 10);
+
+        const day = {
+          id: uid(),
+          label: dayKey,
+          date: dateStr,
+          created_at: new Date().toISOString()
+        };
+
         state.days.push(day);
         Supa.insertDay(day);
         addedDays++;
 
-        for (const task of dayData.tasks) {
-          const t = {
-            id: uid(), day_id: day.id,
-            subject: task.subject, topic: task.topic,
-            estimated_minutes: task.estimated_minutes,
-            status: 'pending', created_at: new Date().toISOString()
+        // Create tasks for this day
+        for (const row of dayTasks) {
+          const task = {
+            id: uid(),
+            day_id: day.id,
+            subject: row.subject.trim(),
+            topic: row.topic.trim(),
+            estimated_minutes: parseInt(row.estimated_minutes),
+            status: 'pending',
+            created_at: new Date().toISOString()
           };
-          state.tasks.push(t);
-          Supa.insertTask(t);
+          state.tasks.push(task);
+          Supa.insertTask(task);
           addedTasks++;
         }
       }
 
       DB.save();
       proc.classList.remove('active');
-      renderPlan(); renderHome();
+      renderPlan();
+      renderHome();
       toast(`Imported ${addedDays} days, ${addedTasks} tasks`, 'success');
 
-    } catch(err) {
-      console.error('PDF error:', err);
+    } catch (err) {
+      console.error('CSV import error:', err);
       proc.classList.remove('active');
-      toast('PDF parsing failed — check format', 'error');
+      toast('Import failed — check file format', 'error');
     }
-  }
-
-  function parsePDFText(text) {
-    /*
-      Expected PDF format:
-        Day 1
-        Quant:
-        • Ratio & Proportion
-        • Percentages
-        LR:
-        • Seating Arrangement
-        Day 2
-        VA:
-        • Reading Comprehension
-      ...
-    */
-    const lines = text.split(/\n|\r/).map(l => l.trim()).filter(Boolean);
-    const days  = [];
-    const SUBJECTS = ['Quant', 'LR', 'AR', 'VA', 'Practice', 'DI', 'RC', 'Verbal', 'Reasoning'];
-
-    let currentDay  = null;
-    let currentSubj = null;
-
-    // Regex patterns
-    const dayPattern  = /^Day\s+(\d+)/i;
-    const subjPattern = new RegExp(`^(${SUBJECTS.join('|')})[:\\s]`, 'i');
-
-    for (const line of lines) {
-      const dayMatch = line.match(dayPattern);
-      if (dayMatch) {
-        currentDay = { label: line.trim(), date: null, tasks: [] };
-        days.push(currentDay);
-        currentSubj = null;
-        continue;
-      }
-
-      const subjMatch = line.match(subjPattern);
-      if (subjMatch && currentDay) {
-        // Normalize subject name
-        const raw = subjMatch[1].toLowerCase();
-        currentSubj = raw === 'quant' ? 'Quant'
-          : raw === 'lr' || raw === 'reasoning' ? 'LR'
-          : raw === 'ar' || raw === 'di' ? 'AR'
-          : raw === 'va' || raw === 'verbal' || raw === 'rc' || raw === 'reading comprehension' ? 'VA'
-          : 'Practice';
-        continue;
-      }
-
-      // Topic line (bullet points or plain)
-      if (currentDay && currentSubj) {
-        const topic = line.replace(/^[•\-*►▶\d\.]\s*/, '').trim();
-        if (topic.length > 3 && topic.length < 120) {
-          // Estimate minutes based on topic keywords
-          let mins = 45;
-          const lower = topic.toLowerCase();
-          if (lower.includes('test') || lower.includes('mock') || lower.includes('full'))   mins = 120;
-          if (lower.includes('revision') || lower.includes('review'))                        mins = 30;
-          if (lower.includes('practice') || lower.includes('exercise'))                      mins = 60;
-
-          currentDay.tasks.push({ subject: currentSubj, topic, estimated_minutes: mins });
-        }
-      }
-    }
-
-    return { days };
   }
 
   // ─── Notifications ────────────────────────────────────────────────────
@@ -3052,12 +3267,12 @@ const App = (() => {
       openSheet('sheetAddDay');
     });
 
-    document.getElementById('btnImportPDF').addEventListener('click', () => {
-      document.getElementById('pdfFileInput').click();
+    document.getElementById('btnImportCSV').addEventListener('click', () => {
+      document.getElementById('csvFileInput').click();
     });
 
-    document.getElementById('pdfFileInput').addEventListener('change', e => {
-      if (e.target.files[0]) handlePDFImport(e.target.files[0]);
+    document.getElementById('csvFileInput').addEventListener('change', e => {
+      if (e.target.files[0]) handleCSVImport(e.target.files[0]);
       e.target.value = '';
     });
 
@@ -3091,7 +3306,8 @@ const App = (() => {
   return {
     init, switchTab, toggleDayCard,
     openAddTask, selectSubject, saveTask,
-    saveDay, toggleTask, deleteTask,
+    saveDay, toggleTask, deleteTask, deleteDay,
+    toggleEditTask, toggleEditDay,
     startSession, startSessionFlow, pauseSession: () => pauseSession(), endSession,
     openReassign, reassignTask,
     toggleSetting, setTheme, saveSupabaseConfig,
