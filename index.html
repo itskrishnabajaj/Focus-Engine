@@ -24,25 +24,26 @@
 
     <!-- ════════════ HOME TAB ════════════ -->
     <div class="tab-panel active" id="tab-home">
+      <!-- Greeting (outside card) -->
+      <div class="home-greeting-outside">
+        <div class="greeting-label" id="greeting">Good morning</div>
+      </div>
+
+      <div class="home-time-card">
       <div class="home-header">
         <div class="greeting-block">
-          <div class="greeting-label" id="greeting">Good morning</div>
           <div class="live-time" id="liveTime">--:--</div>
           <div class="live-date" id="liveDate">Loading...</div>
         </div>
-        <button class="btn-icon-sm" id="btnDayLabel" title="Today's plan label">
-          <svg class="nav-icon" style="width:18px;height:18px" viewBox="0 0 24 24">
-            <path d="M12 5v14M5 12h14"/>
-          </svg>
-        </button>
       </div>
+      </div><!-- end home-time-card -->
 
-      <!-- Motivational Quote -->
+      <!-- Motivational Quote (outside card) -->
       <div class="quote-container" id="quoteContainer">
         <div class="quote-text" id="quoteText"></div>
       </div>
 
-      <!-- Countdown Ring -->
+      <!-- Countdown Ring (outside card) -->
       <div class="ring-container">
         <div class="ring-wrapper">
           <svg class="ring-svg" viewBox="0 0 168 168">
@@ -218,6 +219,14 @@
         </div>
       </div>
 
+      <!-- Subject Analytics -->
+      <div class="section-header" style="padding-top:4px;">
+        <div class="section-title">Subject Analytics</div>
+      </div>
+      <div id="subjectAnalytics" style="padding:0 16px 16px;">
+        <div style="font-size:13px;color:var(--text-3);text-align:center;padding:10px 0">No per-question data yet</div>
+      </div>
+
       <!-- Encouragement card -->
       <div class="encourage-card">
         <div class="encourage-text" id="encourageText">
@@ -235,6 +244,21 @@
         <div class="personal-sub">Quick notes & to-dos (separate from study tracking)</div>
       </div>
 
+      <div class="personal-stats" id="personalStats">
+        <div class="personal-stat-chip">
+          <div class="personal-stat-value" id="personalTotal">0</div>
+          <div class="personal-stat-label">Total</div>
+        </div>
+        <div class="personal-stat-chip">
+          <div class="personal-stat-value" id="personalPending">0</div>
+          <div class="personal-stat-label">Pending</div>
+        </div>
+        <div class="personal-stat-chip">
+          <div class="personal-stat-value" id="personalDone">0</div>
+          <div class="personal-stat-label">Done</div>
+        </div>
+      </div>
+
       <div class="personal-add-box">
         <input type="text" class="personal-input" id="personalInput" placeholder="Add personal task..." maxlength="200">
         <button class="btn-personal-add" id="btnAddPersonal">
@@ -242,6 +266,26 @@
             <path d="M12 5v14M5 12h14"/>
           </svg>
         </button>
+      </div>
+
+      <div class="personal-options-row">
+        <div class="personal-option-group">
+          <label class="personal-option-label">Frequency</label>
+          <div class="personal-chips" id="personalFrequencyChips">
+            <button class="personal-chip active" data-frequency="once">One Time</button>
+            <button class="personal-chip" data-frequency="daily">Daily</button>
+            <button class="personal-chip" data-frequency="weekly">Weekly</button>
+          </div>
+        </div>
+        <div class="personal-option-group">
+          <label class="personal-option-label">Priority</label>
+          <div class="personal-chips" id="personalPriorityChips">
+            <button class="personal-chip active" data-priority="none">None</button>
+            <button class="personal-chip" data-priority="low">Low</button>
+            <button class="personal-chip" data-priority="medium">Med</button>
+            <button class="personal-chip" data-priority="high">High</button>
+          </div>
+        </div>
       </div>
 
       <div class="personal-list" id="personalList">
@@ -261,6 +305,18 @@
     <div class="tab-panel" id="tab-settings">
       <div class="settings-header">
         <div class="settings-title">Settings</div>
+      </div>
+
+      <!-- User Profile -->
+      <div class="settings-group">
+        <div class="settings-group-label">Profile</div>
+        <div class="setting-row" style="flex-direction:column;align-items:stretch;gap:8px;">
+          <div class="setting-label-wrap">
+            <div class="setting-label">Your Name</div>
+            <div class="setting-desc">Used for personalized greetings</div>
+          </div>
+          <input class="form-input" id="settingUserName" placeholder="Enter your name" maxlength="40" style="margin:0">
+        </div>
       </div>
 
       <!-- Day Config -->
@@ -334,16 +390,9 @@
         </div>
       </div>
 
-      <!-- PWA Install -->
+      <!-- App -->
       <div class="settings-group">
         <div class="settings-group-label">App</div>
-        <div class="setting-row">
-          <div class="setting-label-wrap">
-            <div class="setting-label">Install to Home Screen</div>
-            <div class="setting-desc">Add as PWA for offline use</div>
-          </div>
-          <button class="btn-secondary" style="height:36px;padding:0 14px;font-size:12px;" id="btnInstall">Install</button>
-        </div>
         <div class="setting-row">
           <div class="setting-label-wrap">
             <div class="setting-label">Clear Local Data</div>
@@ -353,13 +402,10 @@
         </div>
       </div>
 
-      <!-- Supabase Config -->
+      <!-- Supabase Status -->
       <div class="settings-group">
-        <div class="settings-group-label">Supabase (Optional Cloud Sync)</div>
+        <div class="settings-group-label">Cloud Sync (Supabase)</div>
         <div class="setting-row" style="flex-direction:column;align-items:stretch;gap:10px;">
-          <input class="form-input" id="sbUrl" placeholder="Supabase Project URL" style="margin:0">
-          <input class="form-input" id="sbKey" placeholder="Supabase Anon Key" type="password" style="margin:0">
-          <button class="btn-primary" style="height:44px;font-size:13px;" onclick="App.saveSupabaseConfig()">Connect Supabase</button>
           <div class="supabase-status" id="supabaseStatus"></div>
         </div>
       </div>
@@ -414,9 +460,33 @@
     <div class="session-status" id="sessionStatus">RUNNING</div>
   </div>
 
-  <div class="session-controls">
-    <button class="btn-session-end" id="btnEndSession">End Session</button>
-    <button class="btn-session-pause" id="btnPauseSession">Pause</button>
+  <div class="session-bottom">
+    <div class="session-controls">
+      <button class="btn-session-end" id="btnEndSession">End Session</button>
+      <button class="btn-session-pause" id="btnPauseSession">Pause</button>
+    </div>
+
+    <!-- Per-question controls (hidden by default) -->
+    <div class="per-question-panel" id="perQuestionPanel" style="display:none;width:100%;">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
+        <div style="font-size:12px;color:var(--text-3);text-transform:uppercase;letter-spacing:0.08em;">Question <span id="questionNumber">1</span></div>
+        <div style="font-family:var(--font-mono);font-size:18px;font-weight:500;color:var(--indigo);" id="questionTimer">00:00</div>
+      </div>
+      <div class="session-controls">
+        <button class="btn-session-end" id="btnSkipQuestion" style="font-size:13px;">Skip</button>
+        <button class="btn-session-pause" id="btnNextQuestion" style="font-size:13px;">Next Question</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ SESSION SUMMARY OVERLAY ═══ -->
+<div class="session-summary-overlay" id="sessionSummaryOverlay">
+  <div class="summary-title" id="summaryTitle">Session Complete</div>
+  <div class="summary-stats" id="summaryStats"></div>
+  <div id="summaryDetails"></div>
+  <div style="padding:20px 0;">
+    <button class="btn-primary" onclick="App.closeSummary()">Done</button>
   </div>
 </div>
 
@@ -482,6 +552,31 @@
   </div>
 </div>
 
+<!-- ═══ SESSION MODE SHEET ═══ -->
+<div class="bottom-sheet" id="sheetSessionMode">
+  <div class="sheet-handle"></div>
+  <div class="sheet-title">Choose Session Mode</div>
+  <div style="padding:0 16px;display:flex;flex-direction:column;gap:8px;">
+    <div class="session-pick-item" onclick="App.startSessionWithMode('full')">
+      <div class="pick-dot" style="background:var(--indigo)"></div>
+      <div class="pick-info">
+        <div class="pick-subj" style="color:var(--indigo)">Full Session</div>
+        <div class="pick-topic">Track total time for the session</div>
+      </div>
+    </div>
+    <div class="session-pick-item" onclick="App.startSessionWithMode('perQuestion')">
+      <div class="pick-dot" style="background:var(--amber)"></div>
+      <div class="pick-info">
+        <div class="pick-subj" style="color:var(--amber)">Time Each Question</div>
+        <div class="pick-topic">Track time per individual question</div>
+      </div>
+    </div>
+  </div>
+  <div style="padding:16px 16px 0;">
+    <button class="btn-secondary" style="width:100%" onclick="App.closeSheet()">Cancel</button>
+  </div>
+</div>
+
 <!-- ═══ REASSIGN SHEET ═══ -->
 <div class="bottom-sheet" id="sheetReassign">
   <div class="sheet-handle"></div>
@@ -489,6 +584,21 @@
   <div id="reassignDayList" style="padding:0 16px;max-height:320px;overflow-y:auto;display:flex;flex-direction:column;gap:8px;"></div>
   <div style="padding:16px 16px 0;">
     <button class="btn-secondary" style="width:100%" onclick="App.closeSheet()">Cancel</button>
+  </div>
+</div>
+
+<!-- ═══ CSV IMPORT SELECTION SHEET ═══ -->
+<div class="bottom-sheet csv-import-sheet" id="sheetCSVImport">
+  <div class="sheet-handle"></div>
+  <div class="sheet-title">Import Study Plan</div>
+  <div class="csv-import-controls" style="padding:0 20px 12px;display:flex;gap:8px;">
+    <button class="btn-secondary" style="flex:1;height:36px;font-size:12px;" id="csvSelectAll">Select All</button>
+    <button class="btn-secondary" style="flex:1;height:36px;font-size:12px;" id="csvDeselectAll">Deselect All</button>
+  </div>
+  <div class="csv-import-list" id="csvImportList" style="padding:0 16px;max-height:50vh;overflow-y:auto;display:flex;flex-direction:column;gap:10px;"></div>
+  <div class="sheet-actions" style="padding:16px 20px 0;">
+    <button class="btn-secondary" style="flex:1" onclick="App.closeSheet()">Cancel</button>
+    <button class="btn-primary" style="flex:2" id="csvImportConfirm">Import Selected</button>
   </div>
 </div>
 

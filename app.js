@@ -16,6 +16,9 @@ const App = (() => {
     'Other':    '#6b7294',
   };
 
+  const SUPABASE_URL = 'https://vfgcmesgcfbmokmaseht.supabase.co';
+  const SUPABASE_KEY = 'sb_publishable_rxg1Jo-WFkLJt21207wv3w_04eGdsGZ';
+
   const QUOTES = [
     "Start small. Momentum beats motivation.",
     "Clarity follows action, not overthinking.",
@@ -107,9 +110,11 @@ const App = (() => {
     tasks: [],
     sessions: [],
     personalTasks: [],
+    questionAnalytics: [],
     settings: {
       dayEndTime: '23:00',
       dayStartTime: '06:00',
+      userName: '',
       notifications: {
         study: false,
         brainFog: false,
@@ -136,10 +141,16 @@ const App = (() => {
     pausedAt: null,
     elapsed: 0,
     timerRef: null,
+    mode: 'full',
+    questions: [],
+    currentQuestionStart: null,
+    questionElapsed: 0,
   };
 
   let deferredInstallPrompt = null;
   let clockRef = null;
+  let csvParsedData = null;
+  let csvSelection = {};  // track selection state: { dayKey: { selected: bool, tasks: [bool,...], date: string } }
 
   // ─── LocalStorage ──────────────────────────────────────────────────────
   
@@ -150,6 +161,7 @@ const App = (() => {
         tasks: state.tasks,
         sessions: state.sessions,
         personalTasks: state.personalTasks,
+        questionAnalytics: state.questionAnalytics,
         settings: state.settings,
         pushSubscription: state.pushSubscription,
       }));
@@ -161,6 +173,7 @@ const App = (() => {
         if (saved.tasks) state.tasks = saved.tasks;
         if (saved.sessions) state.sessions = saved.sessions;
         if (saved.personalTasks) state.personalTasks = saved.personalTasks;
+        if (saved.questionAnalytics) state.questionAnalytics = saved.questionAnalytics;
         if (saved.settings) state.settings = Object.assign(state.settings, saved.settings);
         if (saved.pushSubscription) state.pushSubscription = saved.pushSubscription;
       } catch(e) {
@@ -460,6 +473,11 @@ const App = (() => {
     return `${y}-${m}-${d}`;
   }
 
+  function parseLocalDate(dateStr) {
+    if (!dateStr) return new Date();
+    return new Date(dateStr + 'T00:00:00');
+  }
+
   function fmtTime(secs) {
     const h = Math.floor(secs / 3600);
     const m = Math.floor((secs % 3600) / 60);
@@ -474,10 +492,17 @@ const App = (() => {
     return rem === 0 ? `${h}h` : `${h}h ${rem}m`;
   }
 
+  function esc(str) {
+    if (!str) return '';
+    return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+
   function toast(msg, type='') {
     const el = document.createElement('div');
     el.className = `toast ${type}`;
-    el.innerHTML = `<span>${msg}</span>`;
+    const span = document.createElement('span');
+    span.textContent = msg;
+    el.appendChild(span);
     document.getElementById('toast-container').appendChild(el);
     setTimeout(() => { 
       el.style.opacity='0'; 
@@ -535,8 +560,9 @@ const App = (() => {
     document.getElementById('liveDate').textContent =
       now.toLocaleDateString('en-IN', { weekday:'long', day:'numeric', month:'long' });
 
+    const name = state.settings.userName;
     const g = h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening';
-    document.getElementById('greeting').textContent = g;
+    document.getElementById('greeting').textContent = name ? `${g}, ${name}` : g;
 
     const [eh, em] = (state.settings.dayEndTime || '23:00').split(':').map(Number);
     const [sh, sm] = (state.settings.dayStartTime || '06:00').split(':').map(Number);
@@ -616,7 +642,7 @@ const App = (() => {
 
     list.innerHTML = Object.entries(subjectMap).map(([subj, data]) => {
       const color = SUBJECT_COLORS[subj] || SUBJECT_COLORS.Other;
-      const topics = data.tasks.map(t => t.topic).join(', ');
+      const topics = data.tasks.map(t => esc(t.topic)).join(', ');
       const remaining = data.total - data.done;
       const pct = data.total > 0 ? (data.done / data.total) * 100 : 0;
       const allDone = remaining <= 0;
@@ -647,6 +673,14 @@ const App = (() => {
   
   function renderPlan() {
     const list = document.getElementById('daysList');
+
+    // Capture expanded day cards before re-render
+    const expandedDays = new Set();
+    list.querySelectorAll('.day-card.expanded').forEach(card => {
+      const id = card.id.replace('daycard-', '');
+      expandedDays.add(id);
+    });
+
     if (state.days.length === 0) {
       list.innerHTML = `<div class="empty-state">
         <div class="empty-icon">
@@ -665,11 +699,11 @@ const App = (() => {
       const done  = tasks.filter(t => t.status === 'completed').length;
       const today = day.date === todayStr();
 
-      return `<div class="day-card" id="daycard-${day.id}">
+      return `<div class="day-card${expandedDays.has(day.id) ? ' expanded' : ''}" id="daycard-${day.id}">
         <div class="day-card-header" onclick="App.toggleDayCard('${day.id}')">
-          <div class="day-number-badge">${day.label || `Day ${idx+1}`}</div>
+          <div class="day-number-badge">${esc(day.label) || `Day ${idx+1}`}</div>
           <div class="day-info">
-            <div class="day-label" contenteditable="false" data-day-id="${day.id}" data-field="label">${day.label}${today ? ' <span class="badge badge-indigo">Today</span>' : ''}</div>
+            <div class="day-label" contenteditable="false" data-day-id="${day.id}" data-field="label">${esc(day.label)}${today ? ' <span class="badge badge-indigo">Today</span>' : ''}</div>
             <div class="day-meta">${day.date || 'No date'} · ${tasks.length} tasks · ${done}/${tasks.length} done</div>
           </div>
           <div class="day-actions" onclick="event.stopPropagation()">
@@ -702,7 +736,7 @@ const App = (() => {
       </div>
       <div class="task-info">
         <div class="task-subject" style="color:${color}">${task.subject}</div>
-        <div class="task-topic" contenteditable="false" data-field="topic">${task.topic}</div>
+        <div class="task-topic" contenteditable="false" data-field="topic">${esc(task.topic)}</div>
       </div>
       <div class="task-time" contenteditable="false" data-field="minutes">${fmtMins(task.estimated_minutes || 0)}</div>
       <div class="task-actions">
@@ -765,8 +799,8 @@ const App = (() => {
         <div class="pending-dot" style="background:${color}"></div>
         <div class="pending-info">
           <div class="pending-subject" style="color:${color}">${t.subject}</div>
-          <div class="pending-topic">${t.topic}</div>
-          <div class="pending-origin">From ${day ? day.label : 'Unknown'}</div>
+          <div class="pending-topic">${esc(t.topic)}</div>
+          <div class="pending-origin">From ${day ? esc(day.label) : 'Unknown'}</div>
         </div>
         <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px;">
           <div class="pending-time">${fmtMins(t.estimated_minutes || 0)}</div>
@@ -810,7 +844,7 @@ const App = (() => {
         .reduce((a,s) => a + Math.floor((s.duration_seconds||0)/60), 0);
       const maxMins = 240;
       const pct = Math.min(100, Math.round((dayMins / maxMins) * 100));
-      const d = new Date(date);
+      const d = parseLocalDate(date);
       const label = ['S','M','T','W','T','F','S'][d.getDay()];
       const isToday = date === todayStr();
       return `<div class="week-day-col">
@@ -847,21 +881,128 @@ const App = (() => {
         }).join('');
     }
 
+    // Render subject analytics — subject buttons with topic-level detail
+    const analyticsEl = document.getElementById('subjectAnalytics');
+    if (analyticsEl) {
+      if (state.questionAnalytics.length === 0) {
+        analyticsEl.innerHTML = '<div style="font-size:13px;color:var(--text-3);text-align:center;padding:10px 0">No per-question data yet</div>';
+      } else {
+        // Build cumulative subject → topic data
+        const subjData = {};
+        state.questionAnalytics.forEach(qa => {
+          const subj = qa.subject;
+          if (!subjData[subj]) subjData[subj] = { topics: {}, totalQ: 0, totalSecs: 0, sessions: 0 };
+          subjData[subj].totalQ += qa.questions.length;
+          subjData[subj].totalSecs += qa.questions.reduce((a, q) => a + q.seconds, 0);
+          subjData[subj].sessions++;
+
+          const topicName = qa.topic || 'General';
+          if (!subjData[subj].topics[topicName]) {
+            subjData[subj].topics[topicName] = { totalQ: 0, totalSecs: 0, sessions: 0, history: [] };
+          }
+          const td = subjData[subj].topics[topicName];
+          td.totalQ += qa.questions.length;
+          td.totalSecs += qa.questions.reduce((a, q) => a + q.seconds, 0);
+          td.sessions++;
+          td.history.push({ date: qa.date, questions: qa.questions.length, avgSecs: qa.questions.length > 0 ? Math.round(qa.questions.reduce((a, q) => a + q.seconds, 0) / qa.questions.length) : 0 });
+        });
+
+        analyticsEl.innerHTML = Object.entries(subjData).map(([subj, data]) => {
+          const color = SUBJECT_COLORS[subj] || SUBJECT_COLORS.Other;
+          const avgPerQ = data.totalQ > 0 ? Math.round(data.totalSecs / data.totalQ) : 0;
+          const safeKey = encodeURIComponent(subj).replace(/[^a-zA-Z0-9]/g, '_');
+
+          const topicsHtml = Object.entries(data.topics).map(([topic, tData]) => {
+            const topicKey = safeKey + '_' + encodeURIComponent(topic).replace(/[^a-zA-Z0-9]/g, '_');
+            const tAvg = tData.totalQ > 0 ? Math.round(tData.totalSecs / tData.totalQ) : 0;
+            const historyHtml = tData.history.map(h =>
+              `<div class="analytics-history-row"><span class="analytics-history-date">${h.date}</span><span class="analytics-history-stat">${h.questions}Q · avg ${fmtTime(h.avgSecs)}</span></div>`
+            ).join('');
+
+            return `<div class="topic-analytics-item" id="ta-${topicKey}">
+              <div class="topic-analytics-header" onclick="document.getElementById('ta-${topicKey}').classList.toggle('expanded')">
+                <svg class="topic-analytics-arrow" viewBox="0 0 24 24"><polyline points="9,6 15,12 9,18"/></svg>
+                <div class="topic-analytics-name">${topic}</div>
+              </div>
+              <div class="topic-analytics-body">
+                <div class="analytics-metric-row">
+                  <div class="analytics-metric-label">Total Questions</div>
+                  <div class="analytics-metric-value">${tData.totalQ}</div>
+                </div>
+                <div class="analytics-metric-row">
+                  <div class="analytics-metric-label">Avg Time / Question</div>
+                  <div class="analytics-metric-value">${fmtTime(tAvg)}</div>
+                </div>
+                <div class="analytics-metric-row">
+                  <div class="analytics-metric-label">Sessions</div>
+                  <div class="analytics-metric-value">${tData.sessions}</div>
+                </div>
+                ${historyHtml ? '<div class="analytics-history-title">History</div>' + historyHtml : ''}
+              </div>
+            </div>`;
+          }).join('');
+
+          return `<div class="subject-analytics-card" id="sa-${safeKey}">
+            <div class="subject-analytics-header" onclick="App.toggleSubjectAnalytics('${safeKey}')">
+              <div class="subject-analytics-dot" style="background:${color}"></div>
+              <div class="subject-analytics-name">${subj}</div>
+              <div class="subject-analytics-summary">${data.totalQ}Q · ${fmtTime(avgPerQ)} avg</div>
+              <svg class="subject-analytics-chevron" viewBox="0 0 24 24"><polyline points="9,6 15,12 9,18"/></svg>
+            </div>
+            <div class="subject-analytics-body">
+              <div class="analytics-metric-row">
+                <div class="analytics-metric-label">Total Questions</div>
+                <div class="analytics-metric-value">${data.totalQ}</div>
+              </div>
+              <div class="analytics-metric-row">
+                <div class="analytics-metric-label">Avg Time / Question</div>
+                <div class="analytics-metric-value">${fmtTime(avgPerQ)}</div>
+              </div>
+              <div class="analytics-metric-row">
+                <div class="analytics-metric-label">Sessions</div>
+                <div class="analytics-metric-value">${data.sessions}</div>
+              </div>
+              <div class="subject-topics-section">
+                <div class="subject-topics-title">Topics</div>
+                ${topicsHtml}
+              </div>
+            </div>
+          </div>`;
+        }).join('');
+      }
+    }
+
     const enc = ENCOURAGEMENTS[Math.floor(Math.random() * ENCOURAGEMENTS.length)];
     document.getElementById('encourageText').textContent = enc;
 
-    const from = new Date(last7[0]).toLocaleDateString('en-IN', {day:'numeric',month:'short'});
-    const to   = new Date(last7[6]).toLocaleDateString('en-IN', {day:'numeric',month:'short'});
+    const from = parseLocalDate(last7[0]).toLocaleDateString('en-IN', {day:'numeric',month:'short'});
+    const to   = parseLocalDate(last7[6]).toLocaleDateString('en-IN', {day:'numeric',month:'short'});
     document.getElementById('progressRange').textContent = `${from} – ${to}`;
   }
 
   const ENCOURAGEMENTS = QUOTES;
+
+  function toggleSubjectAnalytics(subjKey) {
+    const card = document.getElementById(`sa-${subjKey}`);
+    if (card) card.classList.toggle('expanded');
+  }
 
   // ─── Personal Tasks Rendering ──────────────────────────────────────────
   
   function renderPersonal() {
     const list = document.getElementById('personalList');
     
+    // Update stats
+    const total = state.personalTasks.length;
+    const done = state.personalTasks.filter(t => t.completed).length;
+    const pending = total - done;
+    const totalEl = document.getElementById('personalTotal');
+    const pendingEl = document.getElementById('personalPending');
+    const doneEl = document.getElementById('personalDone');
+    if (totalEl) totalEl.textContent = total;
+    if (pendingEl) pendingEl.textContent = pending;
+    if (doneEl) doneEl.textContent = done;
+
     if (state.personalTasks.length === 0) {
       list.innerHTML = `<div class="empty-state">
         <div class="empty-icon">
@@ -875,19 +1016,33 @@ const App = (() => {
       return;
     }
 
-    list.innerHTML = state.personalTasks.map(task => `
-      <div class="personal-item">
+    // Sort: pending first, then completed
+    const sorted = [...state.personalTasks].sort((a, b) => {
+      if (a.completed === b.completed) return 0;
+      return a.completed ? 1 : -1;
+    });
+
+    list.innerHTML = sorted.map(task => {
+      const dateLabel = task.date ? parseLocalDate(task.date).toLocaleDateString('en-IN', { day:'numeric', month:'short' }) : '';
+      const freq = task.frequency || 'once';
+      const prio = task.priority || 'none';
+      const freqBadge = freq !== 'once' ? `<span class="personal-frequency-badge">${freq === 'daily' ? 'Daily' : 'Weekly'}</span>` : '';
+      const prioDot = prio !== 'none' ? `<div class="personal-priority-dot ${prio}" title="${prio} priority"></div>` : '';
+      return `<div class="personal-item ${task.completed ? 'completed' : ''}">
+        ${prioDot}
         <div class="personal-check ${task.completed ? 'done' : ''}" onclick="App.togglePersonalTask('${task.id}')">
           ${task.completed ? '<svg width="12" height="12" fill="none" stroke="currentColor" stroke-width="3" viewBox="0 0 24 24"><polyline points="20,6 9,17 4,12"/></svg>' : ''}
         </div>
-        <div class="personal-text ${task.completed ? 'done' : ''}">${task.text}</div>
+        <div class="personal-text ${task.completed ? 'done' : ''}">${esc(task.text)}</div>
+        ${freqBadge}
+        ${dateLabel ? `<div class="personal-date">${dateLabel}</div>` : ''}
         <button class="personal-delete" onclick="App.deletePersonalTask('${task.id}')">
           <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
             <polyline points="3,6 5,6 21,6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6m3 0V4a1 1 0 011-1h4a1 1 0 011 1v2"/>
           </svg>
         </button>
-      </div>
-    `).join('');
+      </div>`;
+    }).join('');
   }
 
   // ─── Settings Rendering ────────────────────────────────────────────────
@@ -895,6 +1050,9 @@ const App = (() => {
   function renderSettings() {
     document.getElementById('settingEndTime').value   = state.settings.dayEndTime;
     document.getElementById('settingStartTime').value = state.settings.dayStartTime;
+
+    const nameEl = document.getElementById('settingUserName');
+    if (nameEl) nameEl.value = state.settings.userName || '';
 
     const n = state.settings.notifications;
     setToggleState('toggleStudyNotif',    n.study);
@@ -906,9 +1064,6 @@ const App = (() => {
     document.querySelectorAll('.theme-chip').forEach(c => {
       c.classList.toggle('active', c.dataset.theme === state.settings.theme);
     });
-
-    const sc = state.settings.supabase || {};
-    if (sc.url) document.getElementById('sbUrl').value = sc.url;
   }
 
   function setToggleState(id, on) {
@@ -965,6 +1120,7 @@ const App = (() => {
     Supa.updateTask(taskId, { status: task.status });
     renderPlan();
     renderHome();
+    renderBacklog();
   }
 
   function deleteTask(taskId) {
@@ -998,6 +1154,10 @@ const App = (() => {
       const mMatch = minsText.match(/(\d+)m/);
       if (hMatch) newMins += parseInt(hMatch[1]) * 60;
       if (mMatch) newMins += parseInt(mMatch[1]);
+      if (!hMatch && !mMatch) {
+        const plain = parseInt(minsText.trim(), 10);
+        if (!isNaN(plain) && plain > 0) newMins = plain;
+      }
       
       if (!newTopic || newMins <= 0) {
         toast('Invalid task data', 'error');
@@ -1096,7 +1256,8 @@ const App = (() => {
     const day = state.days.find(d => d.id === dayId);
     if (!day) return;
 
-    const tasksCount = state.tasks.filter(t => t.day_id === dayId).length;
+    const tasksToDelete = state.tasks.filter(t => t.day_id === dayId);
+    const tasksCount = tasksToDelete.length;
     
     if (!confirm(`Delete "${day.label}" and ${tasksCount} task(s)?`)) return;
 
@@ -1104,7 +1265,8 @@ const App = (() => {
     state.days = state.days.filter(d => d.id !== dayId);
     
     DB.save();
-    Supa.deleteDay(dayId);
+    Promise.all(tasksToDelete.map(t => Supa.deleteTask(t.id)))
+      .then(() => Supa.deleteDay(dayId));
     
     renderPlan();
     renderHome();
@@ -1120,7 +1282,7 @@ const App = (() => {
     container.innerHTML = state.days.map(day => {
       return `<div class="session-pick-item" onclick="App.reassignTask('${day.id}')">
         <div class="pick-info">
-          <div class="pick-subj">${day.label}</div>
+          <div class="pick-subj">${esc(day.label)}</div>
           <div style="font-size:12px;color:var(--text-3)">${day.date || 'No date'}</div>
         </div>
       </div>`;
@@ -1171,8 +1333,8 @@ const App = (() => {
         <div class="pick-dot" style="background:${color}"></div>
         <div class="pick-info">
           <div class="pick-subj" style="color:${color}">${t.subject}</div>
-          <div class="pick-topic">${t.topic}</div>
-          ${day && day.date !== today ? `<div style="font-size:11px;color:var(--text-3)">From ${day.label}</div>` : ''}
+          <div class="pick-topic">${esc(t.topic)}</div>
+          ${day && day.date !== today ? `<div style="font-size:11px;color:var(--text-3)">From ${esc(day.label)}</div>` : ''}
         </div>
         <div class="pick-time">${fmtMins(t.estimated_minutes||0)}</div>
       </div>`;
@@ -1186,13 +1348,27 @@ const App = (() => {
 
     closeSheet();
 
-    session.active    = true;
-    session.paused    = false;
     session.taskId    = taskId;
     session.subject   = task.subject;
     session.topic     = task.topic;
+
+    openSheet('sheetSessionMode');
+  }
+
+  function startSessionWithMode(mode) {
+    const task = state.tasks.find(t => t.id === session.taskId);
+    if (!task) return;
+
+    closeSheet();
+
+    session.active    = true;
+    session.paused    = false;
     session.startTime = Date.now();
     session.elapsed   = 0;
+    session.mode      = mode;
+    session.questions = [];
+    session.currentQuestionStart = Date.now();
+    session.questionElapsed = 0;
 
     document.getElementById('sessionSubject').textContent = task.subject;
     document.getElementById('sessionTopic').textContent   = task.topic;
@@ -1201,6 +1377,15 @@ const App = (() => {
     document.getElementById('btnPauseSession').textContent = 'Pause';
     document.getElementById('sessionOverlay').classList.add('active');
 
+    const pqPanel = document.getElementById('perQuestionPanel');
+    if (mode === 'perQuestion') {
+      pqPanel.style.display = '';
+      document.getElementById('questionNumber').textContent = '1';
+      document.getElementById('questionTimer').textContent = '00:00';
+    } else {
+      pqPanel.style.display = 'none';
+    }
+
     session.timerRef = setInterval(tickSession, 1000);
   }
 
@@ -1208,6 +1393,12 @@ const App = (() => {
     if (!session.active || session.paused) return;
     session.elapsed = Math.floor((Date.now() - session.startTime) / 1000);
     document.getElementById('sessionTimer').textContent = fmtTime(session.elapsed);
+
+    if (session.mode === 'perQuestion' && session.currentQuestionStart) {
+      session.questionElapsed = Math.floor((Date.now() - session.currentQuestionStart) / 1000);
+      const qtEl = document.getElementById('questionTimer');
+      if (qtEl) qtEl.textContent = fmtTime(session.questionElapsed);
+    }
   }
 
   function pauseSession() {
@@ -1220,6 +1411,9 @@ const App = (() => {
     } else {
       const pausedDuration = Date.now() - session.pausedAt;
       session.startTime += pausedDuration;
+      if (session.mode === 'perQuestion' && session.currentQuestionStart) {
+        session.currentQuestionStart += pausedDuration;
+      }
       session.paused   = false;
       session.pausedAt = null;
       document.getElementById('btnPauseSession').textContent = 'Pause';
@@ -1231,8 +1425,27 @@ const App = (() => {
     if (!session.active) return;
     clearInterval(session.timerRef);
 
-    const finalElapsed = session.elapsed;
+    // Adjust for pause FIRST, before capturing final question data
+    if (session.paused) {
+      const pausedDuration = Date.now() - session.pausedAt;
+      session.startTime += pausedDuration;
+      if (session.mode === 'perQuestion' && session.currentQuestionStart) {
+        session.currentQuestionStart += pausedDuration;
+      }
+      session.paused = false;
+    }
+
+    // Capture final per-question data (now pause-adjusted)
+    if (session.mode === 'perQuestion' && session.currentQuestionStart) {
+      const qTime = Math.floor((Date.now() - session.currentQuestionStart) / 1000);
+      if (qTime > 0) {
+        session.questions.push({ number: session.questions.length + 1, seconds: qTime, skipped: false });
+      }
+    }
+
+    const finalElapsed = Math.floor((Date.now() - session.startTime) / 1000);
     document.getElementById('sessionOverlay').classList.remove('active');
+    document.getElementById('perQuestionPanel').style.display = 'none';
 
     if (finalElapsed < 10) {
       session.active = false;
@@ -1259,6 +1472,18 @@ const App = (() => {
       }
     }
 
+    // Store per-question analytics
+    if (session.mode === 'perQuestion' && session.questions.length > 0) {
+      state.questionAnalytics.push({
+        id: uid(),
+        sessionId: record.id,
+        subject: session.subject,
+        topic: session.topic,
+        date: todayStr(),
+        questions: session.questions,
+      });
+    }
+
     DB.save();
     Supa.insertSession(record);
     session.active = false;
@@ -1267,9 +1492,82 @@ const App = (() => {
     renderProgress();
     renderBacklog();
 
-    toast(`Session saved — ${fmtTime(finalElapsed)} focused`, 'success');
+    // Show summary overlay
+    showSessionSummary(record, session.questions, session.mode);
 
     if (state.settings.sound) playEndTone();
+  }
+
+  function showSessionSummary(record, questions, mode) {
+    const statsEl = document.getElementById('summaryStats');
+    const detailsEl = document.getElementById('summaryDetails');
+    const totalMins = Math.floor(record.duration_seconds / 60);
+    const totalSecs = record.duration_seconds % 60;
+
+    let statsHtml = `
+      <div class="summary-stat-card">
+        <div class="summary-stat-value">${fmtTime(record.duration_seconds)}</div>
+        <div class="summary-stat-label">Total Time</div>
+      </div>
+      <div class="summary-stat-card">
+        <div class="summary-stat-value">${record.subject}</div>
+        <div class="summary-stat-label">Subject</div>
+      </div>`;
+
+    if (mode === 'perQuestion' && questions.length > 0) {
+      const avgSecs = Math.round(questions.reduce((a, q) => a + q.seconds, 0) / questions.length);
+      statsHtml += `
+        <div class="summary-stat-card">
+          <div class="summary-stat-value">${questions.length}</div>
+          <div class="summary-stat-label">Questions</div>
+        </div>
+        <div class="summary-stat-card">
+          <div class="summary-stat-value">${fmtTime(avgSecs)}</div>
+          <div class="summary-stat-label">Avg / Question</div>
+        </div>`;
+    }
+
+    statsEl.innerHTML = statsHtml;
+
+    let detailsHtml = '';
+    if (mode === 'perQuestion' && questions.length > 0) {
+      const avgSecs = Math.round(questions.reduce((a, q) => a + q.seconds, 0) / questions.length);
+      detailsHtml += '<div class="summary-section-title">Question Breakdown</div>';
+      detailsHtml += questions.map(q => {
+        const slow = q.seconds > avgSecs * 1.5 ? ' slow' : '';
+        return `<div class="summary-question-item">
+          <div class="summary-question-num">${q.skipped ? 'Skipped' : 'Q' + q.number}</div>
+          <div class="summary-question-time${slow}">${fmtTime(q.seconds)}</div>
+        </div>`;
+      }).join('');
+    }
+    detailsEl.innerHTML = detailsHtml;
+
+    document.getElementById('sessionSummaryOverlay').classList.add('active');
+  }
+
+  function closeSummary() {
+    document.getElementById('sessionSummaryOverlay').classList.remove('active');
+  }
+
+  function nextQuestion() {
+    if (!session.active || session.paused || session.mode !== 'perQuestion') return;
+    const qTime = Math.floor((Date.now() - session.currentQuestionStart) / 1000);
+    session.questions.push({ number: session.questions.length + 1, seconds: qTime, skipped: false });
+    session.currentQuestionStart = Date.now();
+    session.questionElapsed = 0;
+    document.getElementById('questionNumber').textContent = session.questions.length + 1;
+    document.getElementById('questionTimer').textContent = '00:00';
+  }
+
+  function skipQuestion() {
+    if (!session.active || session.paused || session.mode !== 'perQuestion') return;
+    const qTime = Math.floor((Date.now() - session.currentQuestionStart) / 1000);
+    session.questions.push({ number: session.questions.length + 1, seconds: qTime, skipped: true });
+    session.currentQuestionStart = Date.now();
+    session.questionElapsed = 0;
+    document.getElementById('questionNumber').textContent = session.questions.length + 1;
+    document.getElementById('questionTimer').textContent = '00:00';
   }
 
   function playEndTone() {
@@ -1350,7 +1648,7 @@ const App = (() => {
         return;
       }
 
-      document.getElementById('csvStatus').textContent = 'Importing schedule…';
+      document.getElementById('csvStatus').textContent = 'Preparing preview…';
 
       const dayGroups = {};
       rows.forEach(row => {
@@ -1359,57 +1657,9 @@ const App = (() => {
         dayGroups[dayKey].push(row);
       });
 
-      // FIXED: Pure local date calculation
-      const baseDate = new Date();
-      const dayKeys = Object.keys(dayGroups);
-      
-      let addedDays = 0, addedTasks = 0;
-
-      for (let i = 0; i < dayKeys.length; i++) {
-        const dayKey = dayKeys[i];
-        const dayTasks = dayGroups[dayKey];
-        
-        // FIXED: Explicit local date construction
-        const localDate = new Date();
-        localDate.setDate(baseDate.getDate() + i);
-        
-        const y = localDate.getFullYear();
-        const m = String(localDate.getMonth() + 1).padStart(2, '0');
-        const d = String(localDate.getDate()).padStart(2, '0');
-        const dateStr = `${y}-${m}-${d}`;
-
-        const day = {
-          id: uid(),
-          label: dayKey,
-          date: dateStr,
-          created_at: new Date().toISOString()
-        };
-
-        state.days.push(day);
-        const result = await Supa.insertDay(day);
-        if (result.success) addedDays++;
-
-        for (const row of dayTasks) {
-          const task = {
-            id: uid(),
-            day_id: day.id,
-            subject: row.subject.trim(),
-            topic: row.topic.trim(),
-            estimated_minutes: parseInt(row.estimated_minutes),
-            status: 'pending',
-            created_at: new Date().toISOString()
-          };
-          state.tasks.push(task);
-          const taskResult = await Supa.insertTask(task);
-          if (taskResult.success) addedTasks++;
-        }
-      }
-
-      DB.save();
+      csvParsedData = dayGroups;
       proc.classList.remove('active');
-      renderPlan();
-      renderHome();
-      toast(`Imported ${addedDays} days, ${addedTasks} tasks`, 'success');
+      showCSVSelectionUI(dayGroups);
 
     } catch (err) {
       console.error('CSV import error:', err);
@@ -1418,13 +1668,178 @@ const App = (() => {
     }
   }
 
+  // ─── CSV Selection UI ───────────────────────────────────────────────────
+
+  function showCSVSelectionUI(dayGroups) {
+    const dayKeys = Object.keys(dayGroups);
+    const baseDate = new Date();
+
+    // Initialize selection state — all selected by default
+    csvSelection = {};
+    dayKeys.forEach((dayKey, i) => {
+      const localDate = new Date(baseDate.getFullYear(), baseDate.getMonth(), baseDate.getDate() + i);
+      const y = localDate.getFullYear();
+      const m = String(localDate.getMonth() + 1).padStart(2, '0');
+      const d = String(localDate.getDate()).padStart(2, '0');
+      csvSelection[dayKey] = {
+        selected: true,
+        tasks: dayGroups[dayKey].map(() => true),
+        date: `${y}-${m}-${d}`
+      };
+    });
+
+    renderCSVSelectionList(dayGroups);
+    openSheet('sheetCSVImport');
+  }
+
+  function renderCSVSelectionList(dayGroups) {
+    const dayKeys = Object.keys(dayGroups || csvParsedData || {});
+    const listEl = document.getElementById('csvImportList');
+    if (!listEl) return;
+
+    const data = dayGroups || csvParsedData;
+    if (!data) return;
+
+    listEl.innerHTML = dayKeys.map((dayKey, dayIdx) => {
+      const sel = csvSelection[dayKey];
+      if (!sel) return '';
+      const tasks = data[dayKey];
+      const dayChecked = sel.selected;
+
+      const checkSvg12 = '<svg width="12" height="12" fill="none" stroke="white" stroke-width="3" viewBox="0 0 24 24"><polyline points="20,6 9,17 4,12"/></svg>';
+      const checkSvg10 = '<svg width="10" height="10" fill="none" stroke="white" stroke-width="3" viewBox="0 0 24 24"><polyline points="20,6 9,17 4,12"/></svg>';
+
+      return `<div class="csv-day-group" data-day-idx="${dayIdx}">
+        <div class="csv-day-header" onclick="App.toggleCSVDay(${dayIdx})">
+          <div class="csv-day-check ${dayChecked ? 'checked' : ''}" data-day-check="${dayIdx}">
+            ${dayChecked ? checkSvg12 : ''}
+          </div>
+          <div class="csv-day-label">${esc(dayKey)}</div>
+          <input type="date" class="csv-day-date-input" data-day-date="${dayIdx}" value="${sel.date}" onclick="event.stopPropagation()" onchange="App.updateCSVDayDate(${dayIdx}, this.value)">
+        </div>
+        <div class="csv-task-list">
+          ${tasks.map((row, idx) => {
+            const color = SUBJECT_COLORS[row.subject.trim()] || SUBJECT_COLORS.Other;
+            const taskChecked = sel.tasks[idx];
+            return `<div class="csv-task-item" data-task-idx="${dayIdx}-${idx}">
+              <div class="csv-task-check ${taskChecked ? 'checked' : ''}" data-task-check="${dayIdx}-${idx}" onclick="App.toggleCSVTask(${dayIdx},${idx})">
+                ${taskChecked ? checkSvg10 : ''}
+              </div>
+              <div class="csv-task-info">
+                <div class="csv-task-subj" style="color:${color}">${esc(row.subject.trim())}</div>
+                <div class="csv-task-topic">${esc(row.topic.trim())}</div>
+              </div>
+              <div class="csv-task-mins">${row.estimated_minutes}m</div>
+            </div>`;
+          }).join('')}
+        </div>
+      </div>`;
+    }).join('');
+  }
+
+  function updateCSVDayDate(dayIdx, value) {
+    const dayKeys = Object.keys(csvParsedData || {});
+    const dayKey = dayKeys[dayIdx];
+    if (dayKey && csvSelection[dayKey]) {
+      csvSelection[dayKey].date = value;
+    }
+  }
+
+  function toggleCSVDay(dayIdx) {
+    const dayKeys = Object.keys(csvParsedData || {});
+    const dayKey = dayKeys[dayIdx];
+    if (!dayKey || !csvSelection[dayKey]) return;
+
+    const sel = csvSelection[dayKey];
+    sel.selected = !sel.selected;
+    sel.tasks = sel.tasks.map(() => sel.selected);
+    renderCSVSelectionList(csvParsedData);
+  }
+
+  function toggleCSVTask(dayIdx, taskIdx) {
+    const dayKeys = Object.keys(csvParsedData || {});
+    const dayKey = dayKeys[dayIdx];
+    if (!dayKey || !csvSelection[dayKey]) return;
+
+    const sel = csvSelection[dayKey];
+    sel.tasks[taskIdx] = !sel.tasks[taskIdx];
+    // Update day checkbox if all tasks are deselected/selected
+    sel.selected = sel.tasks.some(t => t);
+    renderCSVSelectionList(csvParsedData);
+  }
+
+  async function confirmCSVImport() {
+    if (!csvParsedData) return;
+    const dayKeys = Object.keys(csvParsedData);
+    let addedDays = 0, addedTasks = 0;
+
+    for (const dayKey of dayKeys) {
+      const sel = csvSelection[dayKey];
+      if (!sel || !sel.selected) continue;
+
+      // Use STRICT local date from selection state
+      const dateStr = sel.date || todayStr();
+
+      const dayTasks = csvParsedData[dayKey];
+      const selectedTasks = [];
+
+      dayTasks.forEach((row, idx) => {
+        if (sel.tasks[idx]) {
+          selectedTasks.push(row);
+        }
+      });
+
+      if (selectedTasks.length === 0) continue;
+
+      const day = {
+        id: uid(),
+        label: dayKey,
+        date: dateStr,
+        created_at: new Date().toISOString()
+      };
+
+      state.days.push(day);
+      await Supa.insertDay(day);
+      addedDays++;
+
+      for (const row of selectedTasks) {
+        const task = {
+          id: uid(),
+          day_id: day.id,
+          subject: row.subject.trim(),
+          topic: row.topic.trim(),
+          estimated_minutes: parseInt(row.estimated_minutes),
+          status: 'pending',
+          created_at: new Date().toISOString()
+        };
+        state.tasks.push(task);
+        await Supa.insertTask(task);
+        addedTasks++;
+      }
+    }
+
+    DB.save();
+    csvParsedData = null;
+    csvSelection = {};
+    closeSheet();
+    renderPlan();
+    renderHome();
+    toast(`Imported ${addedDays} days, ${addedTasks} tasks`, 'success');
+  }
+
   // ─── Personal Tasks ────────────────────────────────────────────────────
   
   function addPersonalTask() {
     const input = document.getElementById('personalInput');
+    if (!input) return;
     const text = input.value.trim();
     
     if (!text) return;
+
+    const freqChip = document.querySelector('#personalFrequencyChips .personal-chip.active');
+    const prioChip = document.querySelector('#personalPriorityChips .personal-chip.active');
+    const frequency = freqChip ? freqChip.dataset.frequency : 'once';
+    const priority = prioChip ? prioChip.dataset.priority : 'none';
 
     const task = {
       id: uid(),
@@ -1432,6 +1847,8 @@ const App = (() => {
       completed: false,
       date: todayStr(),
       created_at: new Date().toISOString(),
+      frequency,
+      priority,
     };
 
     state.personalTasks.push(task);
@@ -1439,6 +1856,9 @@ const App = (() => {
     Supa.insertPersonalTask(task);
     
     input.value = '';
+    // Reset chips to defaults
+    document.querySelectorAll('#personalFrequencyChips .personal-chip').forEach(c => c.classList.toggle('active', c.dataset.frequency === 'once'));
+    document.querySelectorAll('#personalPriorityChips .personal-chip').forEach(c => c.classList.toggle('active', c.dataset.priority === 'none'));
     renderPersonal();
     toast('Personal task added');
   }
@@ -1448,6 +1868,34 @@ const App = (() => {
     if (!task) return;
     
     task.completed = !task.completed;
+
+    // Handle recurrence: when completing a recurring task, schedule next occurrence
+    if (task.completed && task.frequency && task.frequency !== 'once') {
+      const now = new Date();
+      let nextDate;
+      if (task.frequency === 'daily') {
+        nextDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+      } else if (task.frequency === 'weekly') {
+        nextDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 7);
+      }
+      if (nextDate) {
+        const y = nextDate.getFullYear();
+        const m = String(nextDate.getMonth() + 1).padStart(2, '0');
+        const d = String(nextDate.getDate()).padStart(2, '0');
+        const newTask = {
+          id: uid(),
+          text: task.text,
+          completed: false,
+          date: `${y}-${m}-${d}`,
+          created_at: new Date().toISOString(),
+          frequency: task.frequency,
+          priority: task.priority || 'none',
+        };
+        state.personalTasks.push(newTask);
+        Supa.insertPersonalTask(newTask);
+      }
+    }
+
     DB.save();
     Supa.updatePersonalTask(id, { completed: task.completed });
     renderPersonal();
@@ -1558,25 +2006,14 @@ const App = (() => {
   }
 
   async function saveSupabaseConfig() {
-    const url = document.getElementById('sbUrl').value.trim();
-    const key = document.getElementById('sbKey').value.trim();
-    
-    if (!url || !key) {
-      showSupabaseStatus('Enter both URL and key', 'error');
-      return;
-    }
-
     showSupabaseStatus('Connecting...', 'info');
 
-    const initResult = await Supa.init(url, key);
+    const initResult = await Supa.init(SUPABASE_URL, SUPABASE_KEY);
     
     if (!initResult.success) {
       showSupabaseStatus(`Connection failed: ${initResult.error}`, 'error');
       return;
     }
-
-    state.settings.supabase = { url, key };
-    DB.save();
 
     showSupabaseStatus('Connected! Syncing data...', 'info');
 
@@ -1631,6 +2068,7 @@ const App = (() => {
     state.tasks = []; 
     state.sessions = [];
     state.personalTasks = [];
+    state.questionAnalytics = [];
     DB.save();
     renderHome(); 
     renderPlan(); 
@@ -1671,18 +2109,7 @@ const App = (() => {
       openSheet('sheetAddDay');
     });
 
-    // FIXED: Home tab plus button
-    document.getElementById('btnDayLabel').addEventListener('click', () => {
-      const today = todayStr();
-      const todayDay = state.days.find(d => d.date === today);
-      if (todayDay) {
-        toast('Today\'s plan is already set', 'info');
-      } else {
-        document.getElementById('inputDayDate').value = today;
-        openSheet('sheetAddDay');
-      }
-    });
-
+    // CSV import button
     document.getElementById('btnImportCSV').addEventListener('click', () => {
       document.getElementById('csvFileInput').click();
     });
@@ -1697,7 +2124,22 @@ const App = (() => {
       if (e.key === 'Enter') addPersonalTask();
     });
 
-    document.getElementById('btnInstall').addEventListener('click', handleInstall);
+    // Personal task frequency/priority chip selectors
+    document.querySelectorAll('#personalFrequencyChips .personal-chip').forEach(chip => {
+      chip.addEventListener('click', () => {
+        document.querySelectorAll('#personalFrequencyChips .personal-chip').forEach(c => c.classList.remove('active'));
+        chip.classList.add('active');
+      });
+    });
+    document.querySelectorAll('#personalPriorityChips .personal-chip').forEach(chip => {
+      chip.addEventListener('click', () => {
+        document.querySelectorAll('#personalPriorityChips .personal-chip').forEach(c => c.classList.remove('active'));
+        chip.classList.add('active');
+      });
+    });
+
+    const btnInstallEl = document.getElementById('btnInstall');
+    if (btnInstallEl) btnInstallEl.addEventListener('click', handleInstall);
     document.getElementById('btnClearData').addEventListener('click', clearData);
 
     ['settingEndTime', 'settingStartTime'].forEach(id => {
@@ -1713,20 +2155,98 @@ const App = (() => {
       deferredInstallPrompt = e;
     });
 
+    // User name setting
+    const userNameInput = document.getElementById('settingUserName');
+    if (userNameInput) {
+      userNameInput.addEventListener('change', e => {
+        state.settings.userName = e.target.value.trim();
+        DB.save();
+        updateClock();
+      });
+    }
+
+    // CSV import buttons
+    const csvSelectAll = document.getElementById('csvSelectAll');
+    if (csvSelectAll) {
+      csvSelectAll.addEventListener('click', () => {
+        if (!csvParsedData) return;
+        Object.keys(csvSelection).forEach(key => {
+          csvSelection[key].selected = true;
+          csvSelection[key].tasks = csvSelection[key].tasks.map(() => true);
+        });
+        renderCSVSelectionList(csvParsedData);
+      });
+    }
+    const csvDeselectAll = document.getElementById('csvDeselectAll');
+    if (csvDeselectAll) {
+      csvDeselectAll.addEventListener('click', () => {
+        if (!csvParsedData) return;
+        Object.keys(csvSelection).forEach(key => {
+          csvSelection[key].selected = false;
+          csvSelection[key].tasks = csvSelection[key].tasks.map(() => false);
+        });
+        renderCSVSelectionList(csvParsedData);
+      });
+    }
+    const csvConfirm = document.getElementById('csvImportConfirm');
+    if (csvConfirm) {
+      csvConfirm.addEventListener('click', confirmCSVImport);
+    }
+
+    // Per-question buttons
+    const btnNext = document.getElementById('btnNextQuestion');
+    if (btnNext) btnNext.addEventListener('click', nextQuestion);
+    const btnSkip = document.getElementById('btnSkipQuestion');
+    if (btnSkip) btnSkip.addEventListener('click', skipQuestion);
+
+    // Navigation guard - prevent accidental PWA exit
+    history.pushState(null, '', location.href);
+    window.addEventListener('popstate', function(e) {
+      history.pushState(null, '', location.href);
+      if (session.active) {
+        toast('End the session before navigating', '');
+        return;
+      }
+      const openSheetEl = document.querySelector('.bottom-sheet.active');
+      if (openSheetEl) {
+        closeSheet();
+        return;
+      }
+      const activeTab = document.querySelector('.tab-panel.active');
+      if (activeTab && activeTab.id !== 'tab-home') {
+        const homeBtn = document.querySelector('.nav-item[data-tab="home"]');
+        switchTab('home', homeBtn);
+      }
+    });
+
+    // Keyboard accessibility
+    window.addEventListener('keydown', function(e) {
+      if (e.key === 'Escape') {
+        const summary = document.getElementById('sessionSummaryOverlay');
+        if (summary && summary.classList.contains('active')) {
+          closeSummary();
+          return;
+        }
+        const openSheetEl = document.querySelector('.bottom-sheet.active');
+        if (openSheetEl) {
+          closeSheet();
+        }
+      }
+    });
+
     trySupabaseInit();
   }
 
   async function trySupabaseInit() {
-    const sc = state.settings.supabase;
-    if (sc && sc.url && sc.key) {
-      const result = await Supa.init(sc.url, sc.key);
-      if (result.success) {
-        showSupabaseStatus('Reconnected to Supabase', 'success');
-        Supa.syncDays();
-        Supa.syncTasks();
-        Supa.syncSessions();
-        Supa.syncPersonalTasks();
-      }
+    const result = await Supa.init(SUPABASE_URL, SUPABASE_KEY);
+    if (result.success) {
+      showSupabaseStatus('Connected to Supabase', 'success');
+      Supa.syncDays();
+      Supa.syncTasks();
+      Supa.syncSessions();
+      Supa.syncPersonalTasks();
+    } else {
+      showSupabaseStatus('Supabase offline — data saved locally', 'info');
     }
   }
 
@@ -1746,6 +2266,7 @@ const App = (() => {
     toggleEditTask,
     toggleEditDay,
     startSession,
+    startSessionWithMode,
     startSessionFlow,
     pauseSession,
     endSession,
@@ -1757,9 +2278,17 @@ const App = (() => {
     clearData,
     handleInstall,
     closeSheet,
+    closeSummary,
     addPersonalTask,
     togglePersonalTask,
     deletePersonalTask,
+    toggleCSVDay,
+    toggleCSVTask,
+    updateCSVDayDate,
+    confirmCSVImport,
+    nextQuestion,
+    skipQuestion,
+    toggleSubjectAnalytics,
   };
 
 })();
