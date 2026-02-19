@@ -18,6 +18,7 @@ const App = (() => {
 
   const SUPABASE_URL = 'https://vfgcmesgcfbmokmaseht.supabase.co';
   const SUPABASE_KEY = 'sb_publishable_rxg1Jo-WFkLJt21207wv3w_04eGdsGZ';
+  const VAPID_PUBLIC_KEY = 'BEy_F1htue07CuKuuZ9W_ona_4Jwer5MzMzBovAzYosHkzoWR4hKEPF3fuAHUCUgAGjgIq0dFgei9AqC_JqIuFI'; 
 
   const QUOTES = [
     "Start small. Momentum beats motivation.",
@@ -2002,7 +2003,7 @@ const App = (() => {
       let subscription = await registration.pushManager.getSubscription();
       
       if (!subscription) {
-        const vapidPublicKey = state.settings.supabase?.vapidPublicKey || '';
+        const vapidPublicKey = BEy_F1htue07CuKuuZ9W_ona_4Jwer5MzMzBovAzYosHkzoWR4hKEPF3fuAHUCUgAGjgIq0dFgei9AqC_JqIuFI;
         
         if (!vapidPublicKey) {
           console.warn('VAPID key not configured');
