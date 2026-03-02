@@ -2226,9 +2226,12 @@ input, textarea, select { font-family: var(--font-body); }
 .backlog-sort-select:focus { border-color: var(--indigo); }
 
 /* ─── Mode Switch Button (Feature 2) ──────── */
+.mode-toggle-wrapper {
+  display: flex;
+  justify-content: center;
+  margin-top: 8px;
+}
 .btn-mode-switch {
-  margin-top: 6px;
-  align-self: flex-start;
   background: transparent;
   border: 1px solid rgba(99,102,241,0.3);
   border-radius: 20px;
