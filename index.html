@@ -113,6 +113,12 @@
         </button>
       </div>
 
+      <!-- Plan Search (Feature 5) -->
+      <div class="plan-search-wrap">
+        <svg class="plan-search-icon" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        <input type="text" class="plan-search-input" id="planSearchInput" placeholder="Search subjects, topics...">
+      </div>
+
       <!-- CSV Import strip -->
       <div class="import-strip">
         <div class="import-text">
@@ -160,6 +166,11 @@
 
       <div class="section-header">
         <div class="section-title">Pending Units</div>
+        <select class="backlog-sort-select" id="backlogSortSelect">
+          <option value="date">Sort: Date</option>
+          <option value="subject">Sort: Subject</option>
+          <option value="topic">Sort: Topic</option>
+        </select>
       </div>
 
       <div class="pending-list" id="pendingList">
@@ -169,9 +180,17 @@
               <path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
             </svg>
           </div>
-          <div class="empty-title">All clear</div>
-          <div class="empty-sub">No pending units. Your flow is uninterrupted.</div>
+          <div class="empty-title">All caught up!</div>
+          <div class="empty-sub">No overdue tasks. Keep up the great work!</div>
         </div>
+      </div>
+
+      <!-- Rescheduled Topics (Feature 7) -->
+      <div class="section-header" id="rescheduledHeader" style="padding-top:8px;">
+        <div class="section-title">Rescheduled Topics</div>
+      </div>
+      <div class="pending-list" id="rescheduledList" style="padding:0 16px 16px;">
+        <div style="font-size:13px;color:var(--text-3);text-align:center;padding:10px 0">No rescheduled topics</div>
       </div>
     </div>
 
@@ -216,6 +235,23 @@
         <div class="dist-title">Subject Distribution</div>
         <div id="subjectDist">
           <div style="font-size:13px;color:var(--text-3);text-align:center;padding:10px 0">No sessions yet</div>
+        </div>
+      </div>
+
+      <!-- Week Comparison (Feature 9) -->
+      <div class="week-comparison-card">
+        <div class="dist-title">This Week vs Last Week</div>
+        <div id="weekComparison">
+          <div style="font-size:13px;color:var(--text-3);text-align:center;padding:10px 0">Not enough data</div>
+        </div>
+      </div>
+
+      <!-- Productivity Consistency Score (Feature 9) -->
+      <div class="metric-grid" style="padding:0 16px 16px;grid-template-columns:1fr;">
+        <div class="metric-card accent-indigo">
+          <div class="metric-label">Productivity Consistency</div>
+          <div class="metric-value" id="consistencyScore">0/100</div>
+          <div class="metric-sub">lower variance = higher score</div>
         </div>
       </div>
 
@@ -295,9 +331,17 @@
               <path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
             </svg>
           </div>
-          <div class="empty-title">No personal tasks</div>
-          <div class="empty-sub">Add quick notes and to-dos here.</div>
+          <div class="empty-title">No personal tasks yet</div>
+          <div class="empty-sub">Capture quick to-dos and reminders here.</div>
         </div>
+      </div>
+
+      <!-- Notes & Insights (Feature 8) -->
+      <div class="section-header" style="padding-top:8px;">
+        <div class="section-title">Notes & Insights</div>
+      </div>
+      <div class="session-notes-list" id="sessionNotesList" style="padding:0 16px 16px;">
+        <div style="font-size:13px;color:var(--text-3);text-align:center;padding:10px 0">No notes yet. Notes are added after focus sessions.</div>
       </div>
     </div>
 
@@ -453,6 +497,8 @@
     <div class="session-label">Focus Session</div>
     <div class="session-subject" id="sessionSubject">—</div>
     <div class="session-topic" id="sessionTopic">—</div>
+    <!-- Mode Switch Button (Feature 2) -->
+    <button class="btn-mode-switch" id="btnSwitchMode">Timed Q</button>
   </div>
 
   <div style="display:flex;flex-direction:column;align-items:center;gap:8px;">
@@ -472,9 +518,12 @@
         <div style="font-size:12px;color:var(--text-3);text-transform:uppercase;letter-spacing:0.08em;">Question <span id="questionNumber">1</span></div>
         <div style="font-family:var(--font-mono);font-size:18px;font-weight:500;color:var(--indigo);" id="questionTimer">00:00</div>
       </div>
-      <div class="session-controls">
-        <button class="btn-session-end" id="btnSkipQuestion" style="font-size:13px;">Skip</button>
+      <div class="session-controls" style="margin-top:8px;">
+        <button class="btn-session-end" id="btnPrevQuestion" style="font-size:13px;">← Prev</button>
         <button class="btn-session-pause" id="btnNextQuestion" style="font-size:13px;">Next Question</button>
+      </div>
+      <div style="margin-top:8px;">
+        <button class="btn-session-end" id="btnSkipQuestion" style="font-size:13px;width:100%;max-width:100%;">Skip Question</button>
       </div>
     </div>
   </div>

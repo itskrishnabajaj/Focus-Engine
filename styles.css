@@ -1922,6 +1922,7 @@ input, textarea, select { font-family: var(--font-body); }
 
 .toast.success { border-color: rgba(16,185,129,0.3); }
 .toast.error   { border-color: rgba(244,63,94,0.3); }
+.toast.warning { border-color: rgba(245,158,11,0.3); }
 
 /* ─── PROCESSING OVERLAY ────────────────────── */
 .processing-overlay {
@@ -2086,3 +2087,185 @@ input, textarea, select { font-family: var(--font-body); }
 .encourage-card { transition: border-color 0.3s ease; }
 .ring-value { transition: color 0.3s ease; }
 .theme-chip { transition: background 0.2s ease, border-color 0.2s ease, color 0.2s ease; }
+
+/* ─── Plan Search (Feature 5) ──────────────── */
+.plan-search-wrap {
+  position: relative;
+  padding: 0 16px 12px;
+}
+.plan-search-icon {
+  position: absolute;
+  left: 28px;
+  top: 50%;
+  transform: translateY(calc(-50% - 6px));
+  color: var(--text-3);
+  pointer-events: none;
+}
+.plan-search-input {
+  width: 100%;
+  height: 40px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 0 14px 0 38px;
+  font-size: 13px;
+  color: var(--text-1);
+  outline: none;
+  transition: border-color var(--transition);
+}
+.plan-search-input:focus { border-color: var(--indigo); }
+.plan-search-input::placeholder { color: var(--text-3); }
+
+/* ─── Backlog Sort (Feature 6) ─────────────── */
+.backlog-sort-select {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-size: 12px;
+  color: var(--text-2);
+  font-family: var(--font-body);
+  outline: none;
+  cursor: pointer;
+}
+.backlog-sort-select:focus { border-color: var(--indigo); }
+
+/* ─── Mode Switch Button (Feature 2) ──────── */
+.btn-mode-switch {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  background: var(--indigo-dim);
+  border: 1px solid rgba(99,102,241,0.3);
+  border-radius: 20px;
+  padding: 6px 14px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--indigo);
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  transition: background var(--transition), transform var(--transition-fast);
+  z-index: 10;
+}
+.btn-mode-switch:active { background: rgba(99,102,241,0.25); transform: scale(0.95); }
+.session-top { position: relative; }
+
+/* ─── Session Picker Meta (Feature 1) ──────── */
+.pick-meta {
+  display: flex;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--text-3);
+  font-family: var(--font-mono);
+  margin-top: 2px;
+  flex-wrap: wrap;
+}
+.pick-last {
+  font-size: 10px;
+  color: var(--text-3);
+  margin-top: 1px;
+}
+
+/* ─── Session Notes (Feature 8) ────────────── */
+.summary-notes-section {
+  margin-top: 16px;
+}
+.summary-notes-input {
+  width: 100%;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 12px;
+  font-size: 13px;
+  color: var(--text-1);
+  font-family: var(--font-body);
+  resize: vertical;
+  outline: none;
+  margin-top: 8px;
+  min-height: 60px;
+  transition: border-color var(--transition);
+}
+.summary-notes-input:focus { border-color: var(--indigo); }
+.summary-notes-input::placeholder { color: var(--text-3); }
+
+.session-note-item {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 12px;
+  margin-bottom: 8px;
+}
+.session-note-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+  flex-wrap: wrap;
+}
+.session-note-badge {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.session-note-topic {
+  font-size: 12px;
+  color: var(--text-2);
+  flex: 1;
+}
+.session-note-date {
+  font-size: 11px;
+  color: var(--text-3);
+  font-family: var(--font-mono);
+}
+.session-note-text {
+  font-size: 13px;
+  color: var(--text-1);
+  line-height: 1.5;
+}
+
+/* ─── Week Comparison (Feature 9) ──────────── */
+.week-comparison-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 16px;
+  margin: 0 16px 16px;
+}
+.week-comp-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 6px 0;
+  font-size: 13px;
+  color: var(--text-2);
+}
+.week-comp-row.diff { border-top: 1px solid var(--border); margin-top: 4px; padding-top: 8px; }
+.week-comp-val { font-family: var(--font-mono); font-weight: 500; color: var(--text-1); }
+.week-comp-val.positive { color: var(--emerald); }
+.week-comp-val.negative { color: var(--rose); }
+
+/* ─── Toast Icon (Feature 11) ──────────────── */
+.toast-icon {
+  font-size: 14px;
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  font-weight: 700;
+}
+.toast.success .toast-icon { background: var(--emerald-dim); color: var(--emerald); }
+.toast.error .toast-icon { background: var(--rose-dim); color: var(--rose); }
+.toast.warning .toast-icon { background: var(--amber-dim); color: var(--amber); }
+
+/* ─── Session start animation (Feature 11) ── */
+.session-overlay.active .session-timer { animation: timerPulseIn 0.6s cubic-bezier(0.34,1.56,0.64,1); }
+@keyframes timerPulseIn {
+  from { opacity: 0; transform: scale(0.7); }
+  50%  { transform: scale(1.05); }
+  to   { opacity: 1; transform: scale(1); }
+}

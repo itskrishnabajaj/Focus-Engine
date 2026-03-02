@@ -4,7 +4,7 @@
  * Implements: Offline caching, Push notifications, Background sync
  */
 
-const CACHE_VERSION  = 'focus-engine-v1.3';
+const CACHE_VERSION  = 'focus-engine-v1.4';
 const STATIC_ASSETS  = [
   '/',
   '/index.html',

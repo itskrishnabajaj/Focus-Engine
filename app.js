@@ -16,6 +16,11 @@ const App = (() => {
     'Other':    '#6b7294',
   };
 
+  const MIN_SESSION_SECONDS = 120;
+  const SEARCH_DEBOUNCE_MS = 250;
+  const CONSISTENCY_WEIGHT = 50;
+  const MAX_DISPLAYED_NOTES = 20;
+
   const SUPABASE_URL = 'https://vfgcmesgcfbmokmaseht.supabase.co';
   const SUPABASE_KEY = 'sb_publishable_rxg1Jo-WFkLJt21207wv3w_04eGdsGZ';
   const VAPID_PUBLIC_KEY = 'BEy_F1htue07CuKuuZ9W_ona_4Jwer5MzMzBovAzYosHkzoWR4hKEPF3fuAHUCUgAGjgIq0dFgei9AqC_JqIuFI'; 
@@ -112,6 +117,8 @@ const App = (() => {
     sessions: [],
     personalTasks: [],
     questionAnalytics: [],
+    sessionNotes: [],
+    rescheduledTopics: [],
     settings: {
       dayEndTime: '23:00',
       dayStartTime: '06:00',
@@ -131,6 +138,9 @@ const App = (() => {
     selectedSubject: null,
     pushSubscription: null,
   };
+
+  let backlogSortBy = 'date';
+  let planSearchQuery = '';
 
   let session = {
     active: false,
@@ -152,6 +162,7 @@ const App = (() => {
   let clockRef = null;
   let csvParsedData = null;
   let csvSelection = {};  // track selection state: { dayKey: { selected: bool, tasks: [bool,...], date: string } }
+  let lastSessionRecord = null; // For post-session notes
 
   // ─── LocalStorage ──────────────────────────────────────────────────────
   
@@ -163,6 +174,8 @@ const App = (() => {
         sessions: state.sessions,
         personalTasks: state.personalTasks,
         questionAnalytics: state.questionAnalytics,
+        sessionNotes: state.sessionNotes,
+        rescheduledTopics: state.rescheduledTopics,
         settings: state.settings,
         pushSubscription: state.pushSubscription,
       }));
@@ -175,6 +188,8 @@ const App = (() => {
         if (saved.sessions) state.sessions = saved.sessions;
         if (saved.personalTasks) state.personalTasks = saved.personalTasks;
         if (saved.questionAnalytics) state.questionAnalytics = saved.questionAnalytics;
+        if (saved.sessionNotes) state.sessionNotes = saved.sessionNotes;
+        if (saved.rescheduledTopics) state.rescheduledTopics = saved.rescheduledTopics;
         if (saved.settings) state.settings = Object.assign(state.settings, saved.settings);
         if (saved.pushSubscription) state.pushSubscription = saved.pushSubscription;
       } catch(e) {
@@ -551,6 +566,12 @@ const App = (() => {
     return rem === 0 ? `${h}h` : `${h}h ${rem}m`;
   }
 
+  function fmtHHMM(totalMins) {
+    const h = Math.floor(totalMins / 60);
+    const m = totalMins % 60;
+    return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`;
+  }
+
   function esc(str) {
     if (!str) return '';
     return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
@@ -559,6 +580,12 @@ const App = (() => {
   function toast(msg, type='') {
     const el = document.createElement('div');
     el.className = `toast ${type}`;
+    const TOAST_ICONS = { success: '✓', error: '✗', warning: '⚠' };
+    const icon = TOAST_ICONS[type] || 'ℹ';
+    const iconSpan = document.createElement('span');
+    iconSpan.className = 'toast-icon';
+    iconSpan.textContent = icon;
+    el.appendChild(iconSpan);
     const span = document.createElement('span');
     span.textContent = msg;
     el.appendChild(span);
@@ -732,6 +759,10 @@ const App = (() => {
   
   function renderPlan() {
     const list = document.getElementById('daysList');
+    const searchInput = document.getElementById('planSearchInput');
+    if (searchInput && searchInput.value !== planSearchQuery) {
+      searchInput.value = planSearchQuery;
+    }
 
     // Capture expanded day cards before re-render
     const expandedDays = new Set();
@@ -753,7 +784,25 @@ const App = (() => {
       return;
     }
 
-    list.innerHTML = state.days.map((day, idx) => {
+    const query = planSearchQuery.toLowerCase().trim();
+    const filteredDays = query ? state.days.filter(day => {
+      if (day.label && day.label.toLowerCase().includes(query)) return true;
+      const tasks = state.tasks.filter(t => t.day_id === day.id);
+      return tasks.some(t => 
+        (t.subject && t.subject.toLowerCase().includes(query)) || 
+        (t.topic && t.topic.toLowerCase().includes(query))
+      );
+    }) : state.days;
+
+    if (filteredDays.length === 0) {
+      list.innerHTML = `<div class="empty-state">
+        <div class="empty-title">No matching days</div>
+        <div class="empty-sub">Try a different search term.</div>
+      </div>`;
+      return;
+    }
+
+    list.innerHTML = filteredDays.map((day, idx) => {
       const tasks = state.tasks.filter(t => t.day_id === day.id);
       const done  = tasks.filter(t => t.status === 'completed').length;
       const today = day.date === todayStr();
@@ -814,6 +863,15 @@ const App = (() => {
     if (card) card.classList.toggle('expanded');
   }
 
+  let planSearchTimer = null;
+  function handlePlanSearch(value) {
+    clearTimeout(planSearchTimer);
+    planSearchTimer = setTimeout(() => {
+      planSearchQuery = value;
+      renderPlan();
+    }, SEARCH_DEBOUNCE_MS);
+  }
+
   // ─── Backlog Rendering ─────────────────────────────────────────────────
   
   function renderBacklog() {
@@ -837,36 +895,87 @@ const App = (() => {
     }, 0);
     document.getElementById('backlogDays').textContent = daysOld;
 
+    // Sort pending items
+    const sorted = [...pending].sort((a, b) => {
+      if (backlogSortBy === 'topic') return (a.topic || '').localeCompare(b.topic || '');
+      if (backlogSortBy === 'subject') return (a.subject || '').localeCompare(b.subject || '');
+      // Default: sort by date (oldest first)
+      const dayA = state.days.find(d => d.id === a.day_id);
+      const dayB = state.days.find(d => d.id === b.day_id);
+      return ((dayA && dayA.date) || '').localeCompare((dayB && dayB.date) || '');
+    });
+
+    // Update sort dropdown
+    const sortSelect = document.getElementById('backlogSortSelect');
+    if (sortSelect) sortSelect.value = backlogSortBy;
+
     const list = document.getElementById('pendingList');
-    if (pending.length === 0) {
+    if (sorted.length === 0) {
       list.innerHTML = `<div class="empty-state">
         <div class="empty-icon">
           <svg width="24" height="24" fill="none" stroke="#5a5a7a" stroke-width="1.5" viewBox="0 0 24 24">
             <path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
           </svg>
         </div>
-        <div class="empty-title">All clear</div>
-        <div class="empty-sub">No pending units. Your flow is uninterrupted.</div>
+        <div class="empty-title">All caught up!</div>
+        <div class="empty-sub">No overdue tasks. Keep up the great work!</div>
       </div>`;
-      return;
+    } else {
+      list.innerHTML = sorted.map(t => {
+        const color = SUBJECT_COLORS[t.subject] || SUBJECT_COLORS.Other;
+        const day = state.days.find(d => d.id === t.day_id);
+        return `<div class="pending-item">
+          <div class="pending-dot" style="background:${color}"></div>
+          <div class="pending-info">
+            <div class="pending-subject" style="color:${color}">${t.subject}</div>
+            <div class="pending-topic">${esc(t.topic)}</div>
+            <div class="pending-origin">From ${day ? esc(day.label) : 'Unknown'}</div>
+          </div>
+          <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px;">
+            <div class="pending-time">${fmtMins(t.estimated_minutes || 0)}</div>
+            <button class="btn-reassign" onclick="App.openReassign('${t.id}')">Move</button>
+          </div>
+        </div>`;
+      }).join('');
     }
 
-    list.innerHTML = pending.map(t => {
-      const color = SUBJECT_COLORS[t.subject] || SUBJECT_COLORS.Other;
-      const day = state.days.find(d => d.id === t.day_id);
-      return `<div class="pending-item">
-        <div class="pending-dot" style="background:${color}"></div>
-        <div class="pending-info">
-          <div class="pending-subject" style="color:${color}">${t.subject}</div>
-          <div class="pending-topic">${esc(t.topic)}</div>
-          <div class="pending-origin">From ${day ? esc(day.label) : 'Unknown'}</div>
-        </div>
-        <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px;">
-          <div class="pending-time">${fmtMins(t.estimated_minutes || 0)}</div>
-          <button class="btn-reassign" onclick="App.openReassign('${t.id}')">Move</button>
-        </div>
-      </div>`;
-    }).join('');
+    // Render rescheduled topics section
+    const rescheduledEl = document.getElementById('rescheduledList');
+    const rescheduledHeader = document.getElementById('rescheduledHeader');
+    if (rescheduledEl) {
+      const rescheduled = state.rescheduledTopics.filter(r => {
+        const task = state.tasks.find(t => t.id === r.taskId);
+        return task && task.status !== 'completed';
+      });
+      if (rescheduled.length === 0) {
+        rescheduledEl.style.display = 'none';
+        if (rescheduledHeader) rescheduledHeader.style.display = 'none';
+      } else {
+        rescheduledEl.style.display = '';
+        if (rescheduledHeader) rescheduledHeader.style.display = '';
+        rescheduledEl.innerHTML = rescheduled.map(r => {
+          const task = state.tasks.find(t => t.id === r.taskId);
+          if (!task) return '';
+          const origDay = state.days.find(d => d.id === r.originalDayId);
+          const curDay = state.days.find(d => d.id === task.day_id);
+          const color = SUBJECT_COLORS[task.subject] || SUBJECT_COLORS.Other;
+          return `<div class="pending-item">
+            <div class="pending-dot" style="background:${color}"></div>
+            <div class="pending-info">
+              <div class="pending-subject" style="color:${color}">${task.subject}</div>
+              <div class="pending-topic">${esc(task.topic)}</div>
+              <div class="pending-origin">${origDay ? esc(origDay.label) : '?'} → ${curDay ? esc(curDay.label) : '?'}</div>
+            </div>
+            <button class="btn-reassign" onclick="App.undoReschedule('${r.id}')">Undo</button>
+          </div>`;
+        }).join('');
+      }
+    }
+  }
+
+  function setBacklogSort(value) {
+    backlogSortBy = value;
+    renderBacklog();
   }
 
   // ─── Progress Rendering ────────────────────────────────────────────────
@@ -892,9 +1001,9 @@ const App = (() => {
 
     document.getElementById('metricConsistency').textContent = `${consistency}%`;
     document.getElementById('metricConsistencySub').textContent = `${activeDays} of 7 days`;
-    document.getElementById('metricTotal').textContent = totalMins >= 60 ? `${Math.floor(totalMins/60)}h` : `${totalMins}m`;
+    document.getElementById('metricTotal').textContent = fmtHHMM(totalMins);
     document.getElementById('metricSessions').textContent = recent.length;
-    document.getElementById('metricAvg').textContent = activeDays > 0 ? `${Math.round(totalMins/activeDays)}m` : '0m';
+    document.getElementById('metricAvg').textContent = activeDays > 0 ? fmtHHMM(Math.round(totalMins/activeDays)) : '00:00';
 
     const weekBars = document.getElementById('weekBars');
     weekBars.innerHTML = last7.map((date, i) => {
@@ -1031,6 +1140,42 @@ const App = (() => {
       }
     }
 
+    // Week comparison: this week vs last week
+    const weekCompEl = document.getElementById('weekComparison');
+    if (weekCompEl) {
+      const prev7 = Array.from({length:7}, (_,i) => {
+        const d = new Date(today);
+        d.setDate(d.getDate() - (13-i));
+        const y = d.getFullYear();
+        const m = String(d.getMonth() + 1).padStart(2, '0');
+        const day = String(d.getDate()).padStart(2, '0');
+        return `${y}-${m}-${day}`;
+      });
+      const prevSessions = state.sessions.filter(s => prev7.includes(s.session_date));
+      const prevMins = Math.floor(prevSessions.reduce((a,s) => a + (s.duration_seconds||0), 0) / 60);
+      const diff = totalMins - prevMins;
+      const diffSign = diff >= 0 ? '+' : '';
+      const diffPct = prevMins > 0 ? Math.round((diff / prevMins) * 100) : (totalMins > 0 ? 100 : 0);
+      weekCompEl.innerHTML = `
+        <div class="week-comp-row"><span>This week</span><span class="week-comp-val">${fmtHHMM(totalMins)}</span></div>
+        <div class="week-comp-row"><span>Last week</span><span class="week-comp-val">${fmtHHMM(prevMins)}</span></div>
+        <div class="week-comp-row diff"><span>Difference</span><span class="week-comp-val ${diff >= 0 ? 'positive' : 'negative'}">${diffSign}${Math.abs(diffPct)}%</span></div>`;
+    }
+
+    // Productivity consistency score
+    const consistScoreEl = document.getElementById('consistencyScore');
+    if (consistScoreEl) {
+      const dailyMins = last7.map(date =>
+        state.sessions.filter(s => s.session_date === date).reduce((a,s) => a + Math.floor((s.duration_seconds||0)/60), 0)
+      );
+      const mean = dailyMins.reduce((a,b)=>a+b,0) / 7;
+      const variance = dailyMins.reduce((a,v)=>a+Math.pow(v-mean,2),0) / 7;
+      const stddev = Math.sqrt(variance);
+      // Score based on coefficient of variation: lower daily variance = higher consistency
+      const score = mean > 0 ? Math.max(0, Math.min(100, Math.round(100 - (stddev / mean) * CONSISTENCY_WEIGHT))) : 0;
+      consistScoreEl.textContent = `${score}/100`;
+    }
+
     const enc = ENCOURAGEMENTS[Math.floor(Math.random() * ENCOURAGEMENTS.length)];
     document.getElementById('encourageText').textContent = enc;
 
@@ -1102,6 +1247,28 @@ const App = (() => {
         </button>
       </div>`;
     }).join('');
+
+    // Render session notes section
+    const notesEl = document.getElementById('sessionNotesList');
+    if (notesEl) {
+      if (state.sessionNotes.length === 0) {
+        notesEl.innerHTML = '<div style="font-size:13px;color:var(--text-3);text-align:center;padding:10px 0">No notes yet. Notes are added after focus sessions.</div>';
+      } else {
+        const recentNotes = [...state.sessionNotes].reverse().slice(0, MAX_DISPLAYED_NOTES);
+        notesEl.innerHTML = recentNotes.map(n => {
+          const color = SUBJECT_COLORS[n.subject] || SUBJECT_COLORS.Other;
+          const dateLabel = n.date ? parseLocalDate(n.date).toLocaleDateString('en-IN', { day:'numeric', month:'short' }) : '';
+          return `<div class="session-note-item">
+            <div class="session-note-header">
+              <span class="session-note-badge" style="background:${color}20;color:${color}">${n.subject}</span>
+              <span class="session-note-topic">${esc(n.topic)}</span>
+              <span class="session-note-date">${dateLabel}</span>
+            </div>
+            <div class="session-note-text">${esc(n.text)}</div>
+          </div>`;
+        }).join('');
+      }
+    }
   }
 
   // ─── Settings Rendering ────────────────────────────────────────────────
@@ -1352,6 +1519,14 @@ const App = (() => {
   function reassignTask(dayId) {
     const task = state.tasks.find(t => t.id === state.reassignTaskId);
     if (task) {
+      const originalDayId = task.day_id;
+      state.rescheduledTopics.push({
+        id: uid(),
+        taskId: task.id,
+        originalDayId: originalDayId,
+        newDayId: dayId,
+        date: todayStr(),
+      });
       task.day_id = dayId;
       DB.save();
       Supa.updateTask(task.id, { day_id: dayId });
@@ -1360,6 +1535,22 @@ const App = (() => {
     renderBacklog();
     renderHome();
     toast('Task moved', 'success');
+  }
+
+  function undoReschedule(rescheduleId) {
+    const entry = state.rescheduledTopics.find(r => r.id === rescheduleId);
+    if (!entry) return;
+    const task = state.tasks.find(t => t.id === entry.taskId);
+    if (task) {
+      task.day_id = entry.originalDayId;
+      Supa.updateTask(task.id, { day_id: entry.originalDayId });
+    }
+    state.rescheduledTopics = state.rescheduledTopics.filter(r => r.id !== rescheduleId);
+    DB.save();
+    renderBacklog();
+    renderPlan();
+    renderHome();
+    toast('Undo successful', 'success');
   }
 
   // ─── Focus Session ─────────────────────────────────────────────────────
@@ -1392,14 +1583,34 @@ const App = (() => {
     list.innerHTML = allAvailable.map(t => {
       const color = SUBJECT_COLORS[t.subject] || SUBJECT_COLORS.Other;
       const day = state.days.find(d => d.id === t.day_id);
+      
+      // Calculate topic stats from sessions
+      const topicSessions = state.sessions.filter(s => s.topic === t.topic && s.subject === t.subject);
+      const completedSecs = topicSessions.reduce((a, s) => a + (s.duration_seconds || 0), 0);
+      const completedMins = Math.floor(completedSecs / 60);
+      const estMins = t.estimated_minutes || 0;
+      const remainMins = Math.max(0, estMins - completedMins);
+      
+      // Last session info
+      const lastSession = topicSessions.length > 0 ? topicSessions[topicSessions.length - 1] : null;
+      const lastInfo = lastSession
+        ? `Last: ${lastSession.session_date} · ${fmtMins(Math.floor(lastSession.duration_seconds / 60))}`
+        : '';
+
       return `<div class="session-pick-item" onclick="App.startSession('${t.id}')">
         <div class="pick-dot" style="background:${color}"></div>
         <div class="pick-info">
           <div class="pick-subj" style="color:${color}">${t.subject}</div>
           <div class="pick-topic">${esc(t.topic)}</div>
+          <div class="pick-meta">
+            <span>Est: ${fmtMins(estMins)}</span>
+            ${completedMins > 0 ? `<span>Done: ${fmtMins(completedMins)}</span>` : ''}
+            ${remainMins > 0 && completedMins > 0 ? `<span>Left: ${fmtMins(remainMins)}</span>` : ''}
+          </div>
+          ${lastInfo ? `<div class="pick-last">${lastInfo}</div>` : ''}
           ${day && day.date !== today ? `<div style="font-size:11px;color:var(--text-3)">From ${esc(day.label)}</div>` : ''}
         </div>
-        <div class="pick-time">${fmtMins(t.estimated_minutes||0)}</div>
+        <div class="pick-time">${fmtMins(estMins)}</div>
       </div>`;
     }).join('');
     openSheet('sheetSessionPicker');
@@ -1440,6 +1651,10 @@ const App = (() => {
     document.getElementById('btnPauseSession').textContent = 'Pause';
     document.getElementById('sessionOverlay').classList.add('active');
 
+    // Update mode switch button
+    const modeBtn = document.getElementById('btnSwitchMode');
+    if (modeBtn) modeBtn.textContent = mode === 'full' ? 'Timed Q' : 'Full';
+
     const pqPanel = document.getElementById('perQuestionPanel');
     if (mode === 'perQuestion') {
       pqPanel.style.display = '';
@@ -1450,6 +1665,13 @@ const App = (() => {
     }
 
     session.timerRef = setInterval(tickSession, 1000);
+
+    // Request fullscreen
+    try {
+      const el = document.documentElement;
+      if (el.requestFullscreen) el.requestFullscreen().catch(() => {});
+      else if (el.webkitRequestFullscreen) el.webkitRequestFullscreen();
+    } catch(e) {}
   }
 
   function tickSession() {
@@ -1484,9 +1706,57 @@ const App = (() => {
     }
   }
 
+  function switchSessionMode() {
+    if (!session.active) return;
+    const wasPaused = session.paused;
+    if (!wasPaused) pauseSession();
+
+    // Use pausedAt as the reference point — Date.now() includes pause duration
+    const refTime = session.pausedAt || Date.now();
+
+    if (session.mode === 'perQuestion' && session.currentQuestionStart) {
+      const qTime = Math.floor((refTime - session.currentQuestionStart) / 1000);
+      if (qTime > 0) session.questions.push({ number: session.questions.length + 1, seconds: qTime, skipped: false });
+    }
+
+    session.mode = session.mode === 'full' ? 'perQuestion' : 'full';
+    const pqPanel = document.getElementById('perQuestionPanel');
+    const modeBtn = document.getElementById('btnSwitchMode');
+    if (session.mode === 'perQuestion') {
+      pqPanel.style.display = '';
+      // Set to pausedAt so resume adjustment (+=pausedDuration) yields correct resumeTime
+      session.currentQuestionStart = refTime;
+      session.questionElapsed = 0;
+      document.getElementById('questionNumber').textContent = session.questions.length + 1;
+      document.getElementById('questionTimer').textContent = '00:00';
+    } else {
+      pqPanel.style.display = 'none';
+    }
+    if (modeBtn) modeBtn.textContent = session.mode === 'full' ? 'Timed Q' : 'Full';
+
+    if (!wasPaused) pauseSession();
+    toast(`Switched to ${session.mode === 'full' ? 'Full' : 'Timed Q'} mode`);
+  }
+
+  function prevQuestion() {
+    if (!session.active || session.paused || session.mode !== 'perQuestion') return;
+    if (session.questions.length === 0) return;
+    // Save current question time before going back
+    const curQTime = Math.floor((Date.now() - session.currentQuestionStart) / 1000);
+    if (curQTime > 0) {
+      session.questions.push({ number: session.questions.length + 1, seconds: curQTime, skipped: false });
+    }
+    // Go back to re-do previous question (recorded time is preserved in the array)
+    session.currentQuestionStart = Date.now();
+    session.questionElapsed = 0;
+    document.getElementById('questionNumber').textContent = session.questions.length + 1;
+    document.getElementById('questionTimer').textContent = '00:00';
+  }
+
   function endSession() {
     if (!session.active) return;
     clearInterval(session.timerRef);
+    session.timerRef = null;
 
     // Adjust for pause FIRST, before capturing final question data
     if (session.paused) {
@@ -1496,6 +1766,7 @@ const App = (() => {
         session.currentQuestionStart += pausedDuration;
       }
       session.paused = false;
+      session.pausedAt = null;
     }
 
     // Capture final per-question data (now pause-adjusted)
@@ -1506,12 +1777,21 @@ const App = (() => {
       }
     }
 
-    const finalElapsed = Math.floor((Date.now() - session.startTime) / 1000);
+    // Defensive guard: browser tab suspension or rapid pause/resume edge cases
+    // could theoretically cause startTime drift — clamp to prevent negative display
+    const finalElapsed = Math.max(0, Math.floor((Date.now() - session.startTime) / 1000));
     document.getElementById('sessionOverlay').classList.remove('active');
     document.getElementById('perQuestionPanel').style.display = 'none';
 
-    if (finalElapsed < 10) {
+    // Exit fullscreen
+    try {
+      if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+      else if (document.webkitFullscreenElement) document.webkitExitFullscreen();
+    } catch(e) {}
+
+    if (finalElapsed < MIN_SESSION_SECONDS) {
       session.active = false;
+      toast('Session too short (< 2 min) — not saved', 'warning');
       return;
     }
 
@@ -1551,14 +1831,24 @@ const App = (() => {
 
     DB.save();
     Supa.insertSession(record);
+
+    // Capture data needed for summary before resetting session
+    const summaryQuestions = [...session.questions];
+    const summaryMode = session.mode;
+
+    // Fully reset session state
     session.active = false;
+    session.paused = false;
+    session.taskId = null;
+    session.pausedAt = null;
+    session.currentQuestionStart = null;
 
     renderHome();
     renderProgress();
     renderBacklog();
 
     // Show summary overlay
-    showSessionSummary(record, session.questions, session.mode);
+    showSessionSummary(record, summaryQuestions, summaryMode);
 
     if (state.settings.sound) playEndTone();
   }
@@ -1608,11 +1898,36 @@ const App = (() => {
     }
     detailsEl.innerHTML = detailsHtml;
 
+    // Add notes textarea
+    const notesHtml = `<div class="summary-notes-section">
+      <div class="summary-section-title">Session Notes</div>
+      <textarea class="summary-notes-input" id="summaryNotesInput" placeholder="Any insights, observations, or things to remember..." rows="3"></textarea>
+    </div>`;
+    detailsEl.innerHTML += notesHtml;
+
+    // Store record reference for saving notes on close
+    lastSessionRecord = record;
     document.getElementById('sessionSummaryOverlay').classList.add('active');
   }
 
   function closeSummary() {
-    document.getElementById('sessionSummaryOverlay').classList.remove('active');
+    const overlay = document.getElementById('sessionSummaryOverlay');
+    const notesInput = document.getElementById('summaryNotesInput');
+    if (notesInput && notesInput.value.trim() && lastSessionRecord) {
+      state.sessionNotes.push({
+        id: uid(),
+        sessionId: lastSessionRecord.id,
+        subject: lastSessionRecord.subject,
+        topic: lastSessionRecord.topic,
+        text: notesInput.value.trim(),
+        date: todayStr(),
+        created_at: new Date().toISOString(),
+      });
+      DB.save();
+      toast('Note saved', 'success');
+    }
+    lastSessionRecord = null;
+    overlay.classList.remove('active');
   }
 
   function nextQuestion() {
@@ -2003,7 +2318,7 @@ const App = (() => {
       let subscription = await registration.pushManager.getSubscription();
       
       if (!subscription) {
-        const vapidPublicKey = BEy_F1htue07CuKuuZ9W_ona_4Jwer5MzMzBovAzYosHkzoWR4hKEPF3fuAHUCUgAGjgIq0dFgei9AqC_JqIuFI;
+        const vapidPublicKey = VAPID_PUBLIC_KEY;
         
         if (!vapidPublicKey) {
           console.warn('VAPID key not configured');
@@ -2137,6 +2452,8 @@ const App = (() => {
     state.sessions = [];
     state.personalTasks = [];
     state.questionAnalytics = [];
+    state.sessionNotes = [];
+    state.rescheduledTopics = [];
     DB.save();
     renderHome(); 
     renderPlan(); 
@@ -2266,6 +2583,18 @@ const App = (() => {
     if (btnNext) btnNext.addEventListener('click', nextQuestion);
     const btnSkip = document.getElementById('btnSkipQuestion');
     if (btnSkip) btnSkip.addEventListener('click', skipQuestion);
+    const btnPrev = document.getElementById('btnPrevQuestion');
+    if (btnPrev) btnPrev.addEventListener('click', prevQuestion);
+    const btnSwitch = document.getElementById('btnSwitchMode');
+    if (btnSwitch) btnSwitch.addEventListener('click', switchSessionMode);
+
+    // Plan search
+    const planSearch = document.getElementById('planSearchInput');
+    if (planSearch) planSearch.addEventListener('input', e => handlePlanSearch(e.target.value));
+
+    // Backlog sort
+    const backlogSort = document.getElementById('backlogSortSelect');
+    if (backlogSort) backlogSort.addEventListener('change', e => setBacklogSort(e.target.value));
 
     // Navigation guard - prevent accidental PWA exit
     history.pushState(null, '', location.href);
@@ -2360,8 +2689,11 @@ const App = (() => {
     startSessionFlow,
     pauseSession,
     endSession,
+    switchSessionMode,
+    prevQuestion,
     openReassign,
     reassignTask,
+    undoReschedule,
     toggleSetting,
     setTheme,
     saveSupabaseConfig,
@@ -2379,6 +2711,8 @@ const App = (() => {
     nextQuestion,
     skipQuestion,
     toggleSubjectAnalytics,
+    handlePlanSearch,
+    setBacklogSort,
   };
 
 })();
