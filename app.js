@@ -118,6 +118,7 @@ const App = (() => {
     personalTasks: [],
     questionAnalytics: [],
     sessionNotes: [],
+    questionNotes: [],
     rescheduledTopics: [],
     settings: {
       dayEndTime: '23:00',
@@ -154,6 +155,7 @@ const App = (() => {
     timerRef: null,
     mode: 'full',
     questions: [],
+    questionIndex: 0,
     currentQuestionStart: null,
     questionElapsed: 0,
   };
@@ -175,6 +177,7 @@ const App = (() => {
         personalTasks: state.personalTasks,
         questionAnalytics: state.questionAnalytics,
         sessionNotes: state.sessionNotes,
+        questionNotes: state.questionNotes,
         rescheduledTopics: state.rescheduledTopics,
         settings: state.settings,
         pushSubscription: state.pushSubscription,
@@ -189,6 +192,7 @@ const App = (() => {
         if (saved.personalTasks) state.personalTasks = saved.personalTasks;
         if (saved.questionAnalytics) state.questionAnalytics = saved.questionAnalytics;
         if (saved.sessionNotes) state.sessionNotes = saved.sessionNotes;
+        if (saved.questionNotes) state.questionNotes = saved.questionNotes;
         if (saved.rescheduledTopics) state.rescheduledTopics = saved.rescheduledTopics;
         if (saved.settings) state.settings = Object.assign(state.settings, saved.settings);
         if (saved.pushSubscription) state.pushSubscription = saved.pushSubscription;
@@ -604,7 +608,16 @@ const App = (() => {
   }
 
   function closeSheet() {
-    document.querySelectorAll('.bottom-sheet').forEach(s => s.classList.remove('active'));
+    const activeSheet = document.querySelector('.bottom-sheet.active');
+    if (activeSheet) {
+      activeSheet.classList.add('closing');
+      const cleanup = () => {
+        activeSheet.classList.remove('active', 'closing');
+      };
+      activeSheet.addEventListener('animationend', cleanup, { once: true });
+      // Safety fallback — ensure sheet closes even if animationend doesn't fire
+      setTimeout(cleanup, 350);
+    }
     document.getElementById('sheetBackdrop').classList.remove('active');
     state.currentDayId = null;
     state.reassignTaskId = null;
@@ -1342,6 +1355,7 @@ const App = (() => {
     const task = state.tasks.find(t => t.id === taskId);
     if (!task) return;
     task.status = task.status === 'completed' ? 'pending' : 'completed';
+    if (task.status === 'completed' && navigator.vibrate) navigator.vibrate(30);
     DB.save();
     Supa.updateTask(taskId, { status: task.status });
     renderPlan();
@@ -1641,6 +1655,7 @@ const App = (() => {
     session.elapsed   = 0;
     session.mode      = mode;
     session.questions = [];
+    session.questionIndex = 0;
     session.currentQuestionStart = Date.now();
     session.questionElapsed = 0;
 
@@ -1711,24 +1726,17 @@ const App = (() => {
     const wasPaused = session.paused;
     if (!wasPaused) pauseSession();
 
-    // Use pausedAt as the reference point — Date.now() includes pause duration
-    const refTime = session.pausedAt || Date.now();
-
-    if (session.mode === 'perQuestion' && session.currentQuestionStart) {
-      const qTime = Math.floor((refTime - session.currentQuestionStart) / 1000);
-      if (qTime > 0) session.questions.push({ number: session.questions.length + 1, seconds: qTime, skipped: false });
-    }
-
     session.mode = session.mode === 'full' ? 'perQuestion' : 'full';
     const pqPanel = document.getElementById('perQuestionPanel');
     const modeBtn = document.getElementById('btnSwitchMode');
+
     if (session.mode === 'perQuestion') {
       pqPanel.style.display = '';
-      // Set to pausedAt so resume adjustment (+=pausedDuration) yields correct resumeTime
-      session.currentQuestionStart = refTime;
-      session.questionElapsed = 0;
-      document.getElementById('questionNumber').textContent = session.questions.length + 1;
-      document.getElementById('questionTimer').textContent = '00:00';
+      if (!session.currentQuestionStart) {
+        session.currentQuestionStart = session.pausedAt || Date.now();
+      }
+      document.getElementById('questionNumber').textContent = session.questionIndex + 1;
+      document.getElementById('questionTimer').textContent = fmtTime(session.questionElapsed);
     } else {
       pqPanel.style.display = 'none';
     }
@@ -1740,17 +1748,23 @@ const App = (() => {
 
   function prevQuestion() {
     if (!session.active || session.paused || session.mode !== 'perQuestion') return;
-    if (session.questions.length === 0) return;
-    // Save current question time before going back
+    if (session.questionIndex <= 0) return;
+
+    // Save current question time at current index before going back
     const curQTime = Math.floor((Date.now() - session.currentQuestionStart) / 1000);
-    if (curQTime > 0) {
-      session.questions.push({ number: session.questions.length + 1, seconds: curQTime, skipped: false });
-    }
-    // Go back to re-do previous question (recorded time is preserved in the array)
-    session.currentQuestionStart = Date.now();
-    session.questionElapsed = 0;
-    document.getElementById('questionNumber').textContent = session.questions.length + 1;
-    document.getElementById('questionTimer').textContent = '00:00';
+    session.questions[session.questionIndex] = { number: session.questionIndex + 1, seconds: curQTime, skipped: false };
+
+    // Decrement question index
+    session.questionIndex--;
+
+    // Restore previous question's recorded time
+    const prevQ = session.questions[session.questionIndex];
+    if (!prevQ) return;
+    session.questionElapsed = prevQ.seconds;
+    session.currentQuestionStart = Date.now() - (prevQ.seconds * 1000);
+
+    document.getElementById('questionNumber').textContent = session.questionIndex + 1;
+    document.getElementById('questionTimer').textContent = fmtTime(prevQ.seconds);
   }
 
   function endSession() {
@@ -1773,7 +1787,7 @@ const App = (() => {
     if (session.mode === 'perQuestion' && session.currentQuestionStart) {
       const qTime = Math.floor((Date.now() - session.currentQuestionStart) / 1000);
       if (qTime > 0) {
-        session.questions.push({ number: session.questions.length + 1, seconds: qTime, skipped: false });
+        session.questions[session.questionIndex] = { number: session.questionIndex + 1, seconds: qTime, skipped: false };
       }
     }
 
@@ -1791,6 +1805,10 @@ const App = (() => {
 
     if (finalElapsed < MIN_SESSION_SECONDS) {
       session.active = false;
+      session.questions = [];
+      session.questionIndex = 0;
+      session.questionElapsed = 0;
+      session.mode = 'full';
       toast('Session too short (< 2 min) — not saved', 'warning');
       return;
     }
@@ -1817,13 +1835,14 @@ const App = (() => {
 
     // Store per-question analytics
     if (session.mode === 'perQuestion' && session.questions.length > 0) {
+      const validQuestions = session.questions.filter(q => q !== undefined);
       const qaRecord = {
         id: uid(),
         sessionId: record.id,
         subject: session.subject,
         topic: session.topic,
         date: todayStr(),
-        questions: session.questions,
+        questions: validQuestions,
         created_at: new Date().toISOString(),
       };
       state.questionAnalytics.push(qaRecord);
@@ -1833,7 +1852,7 @@ const App = (() => {
     Supa.insertSession(record);
 
     // Capture data needed for summary before resetting session
-    const summaryQuestions = [...session.questions];
+    const summaryQuestions = session.questions.filter(q => q !== undefined);
     const summaryMode = session.mode;
 
     // Fully reset session state
@@ -1842,6 +1861,10 @@ const App = (() => {
     session.taskId = null;
     session.pausedAt = null;
     session.currentQuestionStart = null;
+    session.questions = [];
+    session.questionIndex = 0;
+    session.questionElapsed = 0;
+    session.mode = 'full';
 
     renderHome();
     renderProgress();
@@ -1850,12 +1873,16 @@ const App = (() => {
     // Show summary overlay
     showSessionSummary(record, summaryQuestions, summaryMode);
 
+    if (navigator.vibrate) navigator.vibrate([100, 50, 100]);
     if (state.settings.sound) playEndTone();
   }
 
   function showSessionSummary(record, questions, mode) {
     const statsEl = document.getElementById('summaryStats');
     const detailsEl = document.getElementById('summaryDetails');
+    const overlay = document.getElementById('sessionSummaryOverlay');
+    if (!statsEl || !detailsEl || !overlay) return;
+    if (!Array.isArray(questions)) questions = [];
     const totalMins = Math.floor(record.duration_seconds / 60);
     const totalSecs = record.duration_seconds % 60;
 
@@ -1907,7 +1934,7 @@ const App = (() => {
 
     // Store record reference for saving notes on close
     lastSessionRecord = record;
-    document.getElementById('sessionSummaryOverlay').classList.add('active');
+    overlay.classList.add('active');
   }
 
   function closeSummary() {
@@ -1933,20 +1960,22 @@ const App = (() => {
   function nextQuestion() {
     if (!session.active || session.paused || session.mode !== 'perQuestion') return;
     const qTime = Math.floor((Date.now() - session.currentQuestionStart) / 1000);
-    session.questions.push({ number: session.questions.length + 1, seconds: qTime, skipped: false });
+    session.questions[session.questionIndex] = { number: session.questionIndex + 1, seconds: qTime, skipped: false };
+    session.questionIndex++;
     session.currentQuestionStart = Date.now();
     session.questionElapsed = 0;
-    document.getElementById('questionNumber').textContent = session.questions.length + 1;
+    document.getElementById('questionNumber').textContent = session.questionIndex + 1;
     document.getElementById('questionTimer').textContent = '00:00';
   }
 
   function skipQuestion() {
     if (!session.active || session.paused || session.mode !== 'perQuestion') return;
     const qTime = Math.floor((Date.now() - session.currentQuestionStart) / 1000);
-    session.questions.push({ number: session.questions.length + 1, seconds: qTime, skipped: true });
+    session.questions[session.questionIndex] = { number: session.questionIndex + 1, seconds: qTime, skipped: true };
+    session.questionIndex++;
     session.currentQuestionStart = Date.now();
     session.questionElapsed = 0;
-    document.getElementById('questionNumber').textContent = session.questions.length + 1;
+    document.getElementById('questionNumber').textContent = session.questionIndex + 1;
     document.getElementById('questionTimer').textContent = '00:00';
   }
 
@@ -1965,19 +1994,36 @@ const App = (() => {
 
   // ─── CSV Import (FIXED: Date Logic) ───────────────────────────────────
   
+  function setCsvStep(stepNum) {
+    for (let i = 1; i <= 4; i++) {
+      const el = document.getElementById('csvStep' + i);
+      if (!el) continue;
+      el.classList.remove('active', 'done');
+      if (i < stepNum) el.classList.add('done');
+      else if (i === stepNum) el.classList.add('active');
+    }
+  }
+
   async function handleCSVImport(file) {
     if (!file || !file.name.toLowerCase().endsWith('.csv')) {
       toast('Please select a valid CSV file', 'error');
       return;
     }
 
+    if (typeof Papa === 'undefined') {
+      toast('CSV parser not loaded — check your internet connection', 'error');
+      return;
+    }
+
     const proc = document.getElementById('csvProcessing');
     proc.classList.add('active');
-    document.getElementById('csvStatus').textContent = 'Reading CSV…';
+    document.getElementById('csvStatus').textContent = 'Reading file…';
+    setCsvStep(1);
 
     try {
       const text = await file.text();
       document.getElementById('csvStatus').textContent = 'Parsing data…';
+      setCsvStep(2);
       
       const parsed = Papa.parse(text, {
         header: true,
@@ -2008,7 +2054,8 @@ const App = (() => {
         return;
       }
 
-      document.getElementById('csvStatus').textContent = 'Validating data…';
+      document.getElementById('csvStatus').textContent = 'Validating rows…';
+      setCsvStep(3);
 
       const errors = [];
       rows.forEach((row, idx) => {
@@ -2030,6 +2077,7 @@ const App = (() => {
       }
 
       document.getElementById('csvStatus').textContent = 'Preparing preview…';
+      setCsvStep(4);
 
       const dayGroups = {};
       rows.forEach(row => {
@@ -2151,8 +2199,15 @@ const App = (() => {
 
   async function confirmCSVImport() {
     if (!csvParsedData) return;
+
+    const proc = document.getElementById('csvProcessing');
+    proc.classList.add('active');
+    document.getElementById('csvStatus').textContent = 'Importing study plan…';
+    setCsvStep(1);
+
     const dayKeys = Object.keys(csvParsedData);
     let addedDays = 0, addedTasks = 0;
+    const totalDays = dayKeys.filter(k => csvSelection[k] && csvSelection[k].selected).length;
 
     for (const dayKey of dayKeys) {
       const sel = csvSelection[dayKey];
@@ -2180,8 +2235,12 @@ const App = (() => {
       };
 
       state.days.push(day);
-      await Supa.insertDay(day);
+      Supa.insertDay(day).catch(e => console.warn('[Supa] day insert failed:', e));
       addedDays++;
+
+      const stepNum = totalDays > 0 ? Math.min(4, Math.ceil((addedDays / totalDays) * 3) + 1) : 1;
+      setCsvStep(stepNum);
+      document.getElementById('csvStatus').textContent = `Adding day ${addedDays} of ${totalDays}…`;
 
       for (const row of selectedTasks) {
         const task = {
@@ -2194,7 +2253,7 @@ const App = (() => {
           created_at: new Date().toISOString()
         };
         state.tasks.push(task);
-        await Supa.insertTask(task);
+        Supa.insertTask(task).catch(e => console.warn('[Supa] task insert failed:', e));
         addedTasks++;
       }
     }
@@ -2202,6 +2261,7 @@ const App = (() => {
     DB.save();
     csvParsedData = null;
     csvSelection = {};
+    proc.classList.remove('active');
     closeSheet();
     renderPlan();
     renderHome();
@@ -2453,6 +2513,7 @@ const App = (() => {
     state.personalTasks = [];
     state.questionAnalytics = [];
     state.sessionNotes = [];
+    state.questionNotes = [];
     state.rescheduledTopics = [];
     DB.save();
     renderHome(); 
